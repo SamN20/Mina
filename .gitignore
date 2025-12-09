@@ -43,6 +43,7 @@ test_*.sh
 
 # Windows batch files (system-specific)
 *.bat
+!satellite/*.bat
 
 # ==============================
 # Dependencies

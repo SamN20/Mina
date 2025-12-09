@@ -3,24 +3,43 @@ import pyautogui
 import os
 import sys
 import asyncio
-from winsdk.windows.media.control import GlobalSystemMediaTransportControlsSessionManager
+
+try:
+    from winsdk.windows.media.control import GlobalSystemMediaTransportControlsSessionManager
+    WINSDK_AVAILABLE = True
+except ImportError:
+    WINSDK_AVAILABLE = False
+    print("Warning: winsdk not available. 'What's playing?' feature will not work.")
 
 # Requirements:
 # pip install python-socketio[client] pyautogui winsdk
 
 # Configuration (Edit these or pass via ENV)
-SERVER_URL = os.getenv('SATELLITE_SERVER', 'http://localhost:3001') # Default to local for testing
+SERVER_URL = os.getenv('SATELLITE_SERVER', '') # MUST BE SET
 USER_ID = os.getenv('DISCORD_USER_ID', '') # MUST BE SET
-TOKEN = os.getenv('SATELLITE_TOKEN', 'secret123') 
+TOKEN = os.getenv('SATELLITE_TOKEN', '') # MUST BE SET
 
 if not USER_ID:
     print("Error: DISCORD_USER_ID environment variable not set.")
     print("Usage: set DISCORD_USER_ID=... && python client.py")
     sys.exit(1)
 
+if not SERVER_URL:
+    print("Error: SATELLITE_SERVER environment variable not set.")
+    print("Contact the bot administrator for the server address.")
+    sys.exit(1)
+
+if not TOKEN:
+    print("Error: SATELLITE_TOKEN environment variable not set.")
+    print("Contact the bot administrator for the authentication token.")
+    sys.exit(1)
+
 sio = socketio.AsyncClient()
 
 async def get_media_info():
+    if not WINSDK_AVAILABLE:
+        return None
+        
     try:
         sessions = await GlobalSystemMediaTransportControlsSessionManager.request_async()
         current_session = sessions.get_current_session()

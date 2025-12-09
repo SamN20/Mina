@@ -205,7 +205,7 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
             // Small delay to ensure connection is stable and user can hear it
             setTimeout(() => {
                 voiceHandler.playFile(guildId, joinSound, 5000, 0.5); // Max 5000ms, 0.5 Volume
-            }, 1000);
+            }, 2000);
         }
 
         // Small delay to let join sound play before greeting user
