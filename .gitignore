@@ -1,0 +1,99 @@
+# ==============================
+# CRITICAL: User Data & Secrets
+# ==============================
+# Discord bot token, API keys
+.env
+
+# User-specific bot settings (voices, models, admin IDs)
+settings.json
+ai_config.txt
+
+# User conversation memory and profiles
+data/
+memory.json
+*.db
+*.sqlite
+
+# Voice transcripts (contains Discord usernames/IDs)
+transcripts/
+
+# ==============================
+# Runtime & Generated Files
+# ==============================
+# Logs (may contain user data, errors with tokens)
+logs/
+*.log
+
+# Audio/TTS Cache
+temp_tts/
+*.mp3
+*.wav
+*.ogg
+
+# ==============================
+# System & Service Files
+# ==============================
+# Systemd service file (contains absolute paths specific to your system)
+*.service
+
+# Shell scripts (may contain system-specific paths)
+start_bot.sh
+start_client.sh
+test_*.sh
+
+# Windows batch files (system-specific)
+*.bat
+
+# ==============================
+# Dependencies
+# ==============================
+# Node modules
+node_modules/
+npm-debug.log
+package-lock.json
+
+# Python virtual environment
+venv/
+.venv/
+env/
+ENV/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.py[cod]
+satellite/__pycache__/
+
+# ==============================
+# Development & Testing
+# ==============================
+# Test/debug scripts (may contain hardcoded test data)
+debug-*.js
+test-*.js
+commands.sh
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+
+# ==============================
+# OS Files
+# ==============================
+.DS_Store
+Thumbs.db
+desktop.ini
+._*
+
+# ==============================
+# Documentation (Temporary)
+# ==============================
+# Migration/setup docs created during server setup
+randDocs/
+MIGRATION_SUMMARY.md
+FIXES.md
+RUNNING.md
+SETUP_SUMMARY.md
