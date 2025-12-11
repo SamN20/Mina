@@ -4,6 +4,13 @@ import os
 import sys
 import subprocess
 
+# Check if winsdk is available
+try:
+    import winsdk
+    WINSDK_AVAILABLE = True
+except ImportError:
+    WINSDK_AVAILABLE = False
+
 class SatelliteSetup:
     def __init__(self, root, on_complete=None):
         self.root = root
@@ -16,6 +23,10 @@ class SatelliteSetup:
         script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self.config_file = os.path.join(script_dir, "config", "satellite_config.bat")
         self.load_config()
+        
+        # Check for winsdk and offer to install if missing
+        if not WINSDK_AVAILABLE:
+            self.prompt_winsdk_install()
         
         # Create UI
         self.create_widgets()
@@ -38,6 +49,92 @@ class SatelliteSetup:
                             self.token = line.split('=', 1)[1].strip()
             except Exception as e:
                 print(f"Error loading config: {e}")
+    
+    def prompt_winsdk_install(self):
+        """Prompt user to install winsdk if not available"""
+        response = messagebox.askyesno(
+            "Windows SDK Not Found",
+            "The Windows SDK (winsdk) package is not installed.\n\n"
+            "This package is required for the 'What's playing?' feature "
+            "to detect currently playing media.\n\n"
+            "Would you like to install it automatically?\n\n"
+            "Note: This will run 'pip install winsdk'",
+            icon='warning'
+        )
+        
+        if response:
+            self.install_winsdk()
+    
+    def install_winsdk(self):
+        """Install winsdk package using pip"""
+        try:
+            # Show progress message
+            progress_window = tk.Toplevel(self.root)
+            progress_window.title("Installing...")
+            progress_window.geometry("400x150")
+            progress_window.resizable(False, False)
+            progress_window.transient(self.root)
+            progress_window.grab_set()
+            
+            tk.Label(
+                progress_window,
+                text="Installing Windows SDK...",
+                font=("Arial", 12, "bold"),
+                pady=20
+            ).pack()
+            
+            progress_label = tk.Label(
+                progress_window,
+                text="Please wait, this may take a minute...",
+                font=("Arial", 10)
+            )
+            progress_label.pack()
+            
+            # Update the window to show it
+            progress_window.update()
+            
+            # Run pip install
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "winsdk"],
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minute timeout
+            )
+            
+            progress_window.destroy()
+            
+            if result.returncode == 0:
+                messagebox.showinfo(
+                    "Success",
+                    "Windows SDK installed successfully!\n\n"
+                    "The 'What's playing?' feature will now be available."
+                )
+                # Update global flag
+                global WINSDK_AVAILABLE
+                WINSDK_AVAILABLE = True
+            else:
+                error_msg = result.stderr if result.stderr else result.stdout
+                messagebox.showerror(
+                    "Installation Failed",
+                    f"Failed to install winsdk:\n\n{error_msg}\n\n"
+                    "You can install it manually later using:\npip install winsdk"
+                )
+        except subprocess.TimeoutExpired:
+            if 'progress_window' in locals():
+                progress_window.destroy()
+            messagebox.showerror(
+                "Installation Timeout",
+                "Installation took too long and was cancelled.\n\n"
+                "Please try installing manually:\npip install winsdk"
+            )
+        except Exception as e:
+            if 'progress_window' in locals():
+                progress_window.destroy()
+            messagebox.showerror(
+                "Installation Error",
+                f"An error occurred during installation:\n\n{e}\n\n"
+                "You can install it manually using:\npip install winsdk"
+            )
     
     def create_widgets(self):
         # Title
