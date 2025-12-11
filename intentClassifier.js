@@ -254,9 +254,197 @@ function processTranscription(text) {
     };
 }
 
+/**
+ * Parse reminder requests from text
+ * @param {string} text - Input text (after wake word)
+ * @returns {object|null} - Parsed reminder or null
+ */
+function parseReminder(text) {
+    // Patterns for reminder requests
+    // Use greedy (.+) for message to capture up to the LAST "in/at"
+    const patterns = [
+        /remind me (?:to )?(.+)(?:\s+in\s+(.+))/i,
+        /set a reminder (?:to |for )?(.+)(?:\s+in\s+(.+))/i,
+        /remind me (?:to )?(.+)(?:\s+at\s+(.+))/i,
+        /set a reminder (?:to |for )?(.+)(?:\s+at\s+(.+))/i
+    ];
+
+    for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (match) {
+            const message = match[1].trim();
+            const timeStr = match[2];
+
+            if (message && timeStr) {
+                const parsedTime = parseTime(timeStr);
+                if (parsedTime) {
+                    return {
+                        message,
+                        remindAt: parsedTime.toISOString()
+                    };
+                }
+            }
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Parse timer requests
+ * @param {string} text 
+ * @returns {object|null}
+ */
+function parseTimer(text) {
+    const patterns = [
+        /set a timer for (.+)/i,
+        /set timer for (.+)/i,
+        /^timer for (.+)/i,
+        /set a (.+) timer/i,
+        /set (.+) timer/i
+    ];
+
+    for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (match) {
+            const timeStr = match[1].trim();
+            const parsedTime = parseTime(timeStr);
+            if (parsedTime) {
+                return {
+                    message: "Timer",
+                    remindAt: parsedTime.toISOString(),
+                    isTimer: true
+                };
+            }
+        }
+    }
+    return null;
+}
+
+/**
+ * Convert number words to digits
+ * @param {string} text 
+ * @returns {string}
+ */
+function convertWordsToNumbers(text) {
+    const map = {
+        'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
+        'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
+        'eleven': 11, 'twelve': 12, 'twenty': 20, 'thirty': 30,
+        'forty': 40, 'fifty': 50, 'sixty': 60
+    };
+    return text.replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty|thirty|forty|fifty|sixty)\b/gi, match => map[match.toLowerCase()] || match);
+}
+
+/**
+ * Parse time strings into Date objects
+ * @param {string} timeStr - Time string like "30 minutes", "2 hours", "tomorrow at 3pm"
+ * @returns {Date|null} - Parsed date or null
+ */
+function parseTime(timeStr) {
+    const now = new Date();
+    let targetTime = new Date(now);
+
+    // Normalize: convert words to numbers
+    timeStr = convertWordsToNumbers(timeStr.toLowerCase());
+
+    // Handle duration (composite supported: "1 hour 30 minutes")
+    // Look for any number followed by a unit
+    const unitRegex = /(\d+)\s*(minute|min|hour|hr|day|week|second|sec)s?/gi;
+    let hasDuration = false;
+    let match;
+    
+    // Scan for all duration parts
+    while ((match = unitRegex.exec(timeStr)) !== null) {
+        hasDuration = true;
+        const amount = parseInt(match[1]);
+        const unit = match[2].toLowerCase();
+        
+        switch (unit) {
+            case 'second':
+            case 'sec':
+                targetTime.setSeconds(targetTime.getSeconds() + amount);
+                break;
+            case 'minute':
+            case 'min':
+                targetTime.setMinutes(targetTime.getMinutes() + amount);
+                break;
+            case 'hour':
+            case 'hr':
+                targetTime.setHours(targetTime.getHours() + amount);
+                break;
+            case 'day':
+                targetTime.setDate(targetTime.getDate() + amount);
+                break;
+            case 'week':
+                targetTime.setDate(targetTime.getDate() + amount * 7);
+                break;
+        }
+    }
+    
+    if (hasDuration) return targetTime;
+
+    // Handle "at X" - simple time parsing
+    // Make "at" optional
+    const atPattern = /(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i;
+    const atMatch = timeStr.match(atPattern);
+    if (atMatch) {
+        // Ensure it's not just a random number (require am/pm OR colon OR "at")
+        // If "at" is missing, we need stronger signal like am/pm or colon
+        const hasAt = timeStr.includes('at');
+        const hasColon = !!atMatch[2];
+        const hasAmPm = !!atMatch[3];
+
+        if (!hasAt && !hasColon && !hasAmPm) {
+            // Just a number like "5" - ambiguous, could be duration without unit? 
+            // But duration regex handles units.
+            // Assume it's time if it's in a time context, but be careful.
+            // For now, require at least one indicator if "at" is missing.
+            return null; 
+        }
+
+        let hour = parseInt(atMatch[1]);
+        const minute = parseInt(atMatch[2] || 0);
+        const ampm = atMatch[3]?.toLowerCase();
+
+        if (ampm === 'pm' && hour !== 12) hour += 12;
+        if (ampm === 'am' && hour === 12) hour = 0;
+
+        targetTime.setHours(hour, minute, 0, 0);
+
+        // If the time is in the past today, assume tomorrow
+        if (targetTime <= now) {
+            targetTime.setDate(targetTime.getDate() + 1);
+        }
+
+        return targetTime;
+    }
+
+    // Handle "tomorrow at X"
+    const tomorrowPattern = /tomorrow(?:\s+at)?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i;
+    const tomorrowMatch = timeStr.match(tomorrowPattern);
+    if (tomorrowMatch) {
+        let hour = parseInt(tomorrowMatch[1]);
+        const minute = parseInt(tomorrowMatch[2] || 0);
+        const ampm = tomorrowMatch[3]?.toLowerCase();
+
+        if (ampm === 'pm' && hour !== 12) hour += 12;
+        if (ampm === 'am' && hour === 12) hour = 0;
+
+        targetTime.setDate(targetTime.getDate() + 1);
+        targetTime.setHours(hour, minute, 0, 0);
+
+        return targetTime;
+    }
+
+    return null;
+}
+
 module.exports = {
     normalizeWakeWord,
     classifyIntent,
     calculateTriggerConfidence,
-    processTranscription
+    processTranscription,
+    parseReminder,
+    parseTimer
 };

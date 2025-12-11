@@ -6,6 +6,7 @@ const http = require('http'); // For Socket.io
 const satelliteServer = require('./satelliteServer');
 const voiceHandler = require('./voiceHandler');
 const storage = require('./storage');
+const reminders = require('./reminders');
 
 // Satellite Server Setup
 const server = http.createServer((req, res) => {
@@ -56,6 +57,32 @@ for (const file of commandFiles) {
 client.once(Events.ClientReady, c => {
     console.log(`Ready! Logged in as ${c.user.tag}`);
     c.user.setActivity('Listening for /join', { type: ActivityType.Listening });
+
+    // Load and schedule existing reminders
+    const activeReminders = reminders.getActiveReminders();
+    console.log(`[Reminders] Loading ${activeReminders.length} active reminders`);
+
+    for (const reminder of activeReminders) {
+        // Find which guild the user is in (we need to check all guilds)
+        for (const guild of c.guilds.cache.values()) {
+            try {
+                const member = guild.members.cache.get(reminder.userId);
+                if (member) {
+                    // Schedule the reminder for this guild
+                    voiceHandler.scheduleReminder(c, guild.id, reminder.userId, reminder);
+                    break; // Found the guild, no need to check others
+                }
+            } catch (e) {
+                // User might not be in this guild or other error
+                continue;
+            }
+        }
+    }
+
+    // Clean up old reminders periodically
+    setInterval(() => {
+        reminders.cleanupOldReminders();
+    }, 60 * 60 * 1000); // Clean up every hour
 });
 
 client.on(Events.InteractionCreate, async interaction => {

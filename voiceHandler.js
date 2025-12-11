@@ -15,6 +15,7 @@ const tts = require('./tts');
 const gemini = require('./ai'); // Use generic provider
 const memory = require('./memory');
 const intentClassifier = require('./intentClassifier');
+const reminders = require('./reminders');
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ActivityType } = require('discord.js');
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -51,6 +52,24 @@ function getGttsParams(code) {
         'ru-RU': { lang: 'ru', tld: 'ru' }
     };
     return mapping[code] || { lang: 'en', tld: 'com' };
+}
+
+// Convert numbers to words for TTS
+function numberToWords(num) {
+    const ones = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+    const teens = ['ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+    const tens = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+    
+    if (num === 0) return 'zero';
+    if (num < 10) return ones[num];
+    if (num < 20) return teens[num - 10];
+    if (num < 100) {
+        const ten = Math.floor(num / 10);
+        const one = num % 10;
+        return tens[ten] + (one > 0 ? ' ' + ones[one] : '');
+    }
+    // For numbers >= 100, just return as string for now (could extend if needed)
+    return num.toString();
 }
 
 // Load responses
@@ -360,11 +379,72 @@ function startListening(connection, guild) {
                             }
                         }
                         
-                        // Only proceed to AI if we didn't handle it as a music command
+                        // Check for reminder requests
+                        const reminderData = intentClassifier.parseReminder(query);
+                        if (reminderData) {
+                            console.log(`[Reminder] Parsed reminder: "${reminderData.message}" at ${reminderData.remindAt}`);
+                            
+                            // Add the reminder
+                            const reminder = reminders.addReminder(userId, reminderData.message, reminderData.remindAt);
+                            
+                            // Schedule the reminder
+                            scheduleReminder(guild.client, guild.id, userId, reminder);
+                            
+                            // Confirm to user
+                            const remindTime = new Date(reminderData.remindAt);
+                            const timeUntil = Math.round((remindTime - new Date()) / 1000 / 60);
+                            const timeWords = numberToWords(timeUntil);
+                            const confirmations = [
+                                `Got it! I'll remind you to ${reminderData.message} in ${timeWords} minutes.`,
+                                `Reminder set! I'll let you know to ${reminderData.message} in ${timeWords} minutes.`,
+                                `Okay, I'll remind you about ${reminderData.message} in ${timeWords} minutes.`
+                            ];
+                            speak(guild.id, confirmations[Math.floor(Math.random() * confirmations.length)]);
+                            shouldSkipAI = true;
+                        }
+
+                        // Check for timer requests
+                        const timerData = intentClassifier.parseTimer(query);
+                        if (timerData) {
+                            console.log(`[Timer] Parsed timer for ${timerData.remindAt}`);
+                            
+                            // Add the timer (as a reminder)
+                            const reminder = reminders.addReminder(userId, "Timer is up!", timerData.remindAt);
+                            
+                            // Schedule the reminder
+                            scheduleReminder(guild.client, guild.id, userId, reminder);
+                            
+                            // Confirm to user
+                            const remindTime = new Date(timerData.remindAt);
+                            const now = new Date();
+                            const diffMs = remindTime - now;
+                            
+                            // Format confirmation duration
+                            let durationStr = "";
+                            const hours = Math.floor(diffMs / (1000 * 60 * 60));
+                            const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+                            const seconds = Math.floor((diffMs % (1000 * 60)) / 1000);
+                            
+                            if (hours > 0) durationStr += `${numberToWords(hours)} hour${hours!==1?'s':''} `;
+                            if (minutes > 0) durationStr += `${numberToWords(minutes)} minute${minutes!==1?'s':''} `;
+                            if (seconds > 0 && hours === 0) durationStr += `${numberToWords(seconds)} second${seconds!==1?'s':''} `;
+                            
+                            if (!durationStr) durationStr = "zero seconds";
+
+                            const confirmations = [
+                                `Timer set for ${durationStr.trim()}.`,
+                                `Okay, counting down ${durationStr.trim()}.`,
+                                `Starting timer for ${durationStr.trim()}.`
+                            ];
+                            speak(guild.id, confirmations[Math.floor(Math.random() * confirmations.length)]);
+                            shouldSkipAI = true;
+                        }
+                        
+                        // Only proceed to AI if we didn't handle it as a music command or reminder
                         debugLog(`[Debug] shouldSkipAI = ${shouldSkipAI}`);
                         if (shouldSkipAI) {
-                            debugLog(`[Debug] Returning early for music command`);
-                            return; // Exit early for music commands
+                            debugLog(`[Debug] Returning early for music command or reminder`);
+                            return; // Exit early for music commands or reminders
                         }
                         
                         console.log(`[AI] Triggered by ${username}: "${query}"`);
@@ -682,6 +762,129 @@ Generate the spoken greeting:
     }
 }
 
+// Schedule a reminder to be announced
+function scheduleReminder(client, guildId, userId, reminder) {
+    const remindAt = new Date(reminder.remindAt);
+    const now = new Date();
+    const delay = remindAt - now;
+
+    if (delay <= 0) {
+        console.log(`[Reminder] Reminder ${reminder.id} is already past due, skipping`);
+        return;
+    }
+
+    console.log(`[Reminder] Scheduling reminder ${reminder.id} for ${remindAt.toISOString()} (${Math.round(delay / 1000 / 60)} minutes from now)`);
+
+    setTimeout(async () => {
+        const reminderMessage = `Reminder: ${reminder.message}`;
+        
+        // 1. Fetch Guild & User
+        const guild = client.guilds.cache.get(guildId);
+        if (!guild) {
+            // Guild gone? Try to DM user directly via client
+            const user = await client.users.fetch(userId).catch(() => null);
+            if (user) user.send(`🔔 ${reminderMessage}`).catch(e => console.error("Failed to DM user", e));
+            reminders.removeReminder(reminder.id);
+            return;
+        }
+
+        const member = await guild.members.fetch(userId).catch(() => null);
+        const user = member ? member.user : await client.users.fetch(userId).catch(() => null);
+
+        if (!user) {
+            reminders.removeReminder(reminder.id);
+            return;
+        }
+
+        // 2. Check Bot & User Voice State
+        const botConnection = connections.get(guildId);
+        const isBotInVoice = !!botConnection && botConnection.state.status !== VoiceConnectionStatus.Destroyed;
+        const userVoiceChannelId = member?.voice?.channelId;
+
+        // CASE A: Bot is in voice
+        if (isBotInVoice) {
+            const botChannelId = botConnection.joinConfig.channelId;
+            
+            // If user is in SAME channel -> Speak
+            if (userVoiceChannelId === botChannelId) {
+                console.log(`[Reminder] Triggering reminder in voice: "${reminderMessage}"`);
+                speak(guildId, reminderMessage);
+            } 
+            // If user is NOT in same channel -> DM
+            else {
+                console.log(`[Reminder] User not in bot channel. Sending DM.`);
+                user.send(`🔔 ${reminderMessage}`).catch(e => console.error(`Failed to DM user ${userId}:`, e));
+            }
+        }
+        // CASE B: Bot is NOT in voice
+        else {
+            // If user is in a voice channel -> Join, Speak, Leave
+            if (userVoiceChannelId) {
+                try {
+                    const channel = guild.channels.cache.get(userVoiceChannelId);
+                    if (channel && channel.joinable) {
+                        console.log(`[Reminder] Joining ${channel.name} to deliver reminder...`);
+                        
+                        const connection = joinVoiceChannel({
+                            channelId: channel.id,
+                            guildId: guild.id,
+                            adapterCreator: guild.voiceAdapterCreator,
+                            selfDeaf: false,
+                            selfMute: false,
+                            daveEncryption: false
+                        });
+                        
+                        connections.set(guild.id, connection);
+                        
+                        connection.on(VoiceConnectionStatus.Ready, async () => {
+                            // Wait a sec
+                            await new Promise(r => setTimeout(r, 1000));
+                            
+                            // Speak
+                            await speak(guild.id, reminderMessage);
+                            
+                            // Wait for playback to finish (poll isSpeaking)
+                            const checkInterval = setInterval(() => {
+                                const speaking = isSpeaking.get(guild.id);
+                                const queue = ttsQueues.get(guild.id);
+                                if (!speaking && (!queue || queue.length === 0)) {
+                                    clearInterval(checkInterval);
+                                    // Give it a moment of silence then leave
+                                    setTimeout(() => {
+                                        try {
+                                            connection.destroy();
+                                            connections.delete(guild.id);
+                                        } catch(e) {}
+                                    }, 1000);
+                                }
+                            }, 500);
+                            
+                            // Safety timeout (30s)
+                            setTimeout(() => {
+                                clearInterval(checkInterval);
+                                try { connection.destroy(); connections.delete(guild.id); } catch(e) {}
+                            }, 30000);
+                        });
+                    } else {
+                        // Can't join -> DM
+                        user.send(`🔔 ${reminderMessage}`).catch(e => console.error(`Failed to DM user ${userId}:`, e));
+                    }
+                } catch (e) {
+                    console.error("Failed to join for reminder:", e);
+                    user.send(`🔔 ${reminderMessage}`).catch(e => console.error(`Failed to DM user ${userId}:`, e));
+                }
+            } 
+            // User not in voice -> DM
+            else {
+                user.send(`🔔 ${reminderMessage}`).catch(e => console.error(`Failed to DM user ${userId}:`, e));
+            }
+        }
+
+        // Remove the reminder after triggering
+        reminders.removeReminder(reminder.id);
+    }, delay);
+}
+
 module.exports = {
     joinChannel,
     leaveChannel,
@@ -689,5 +892,6 @@ module.exports = {
     stopTTS,
     playFile,
     getBotChannelId,
-    greetNewUser
+    greetNewUser,
+    scheduleReminder
 };
