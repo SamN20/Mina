@@ -28,12 +28,61 @@ Mina is a highly capable Discord voice bot that uses AI (LLMs) to listen, unders
     - Create configuration files (`.env`, `ai_config.txt`).
     - Install Node.js dependencies.
     - Create a Python virtual environment (`venv`) and install required packages (`vosk`, `winsdk`, etc.).
+    - Download the Vosk small model (40MB, vosk-model-small-en-us-0.15) - lightweight and efficient.
 
 3.  **Start the Bot**
     ```bash
     node index.js
     ```
     (Or use `start_bot.bat` on Windows)
+
+## Vosk Model Selection
+
+Mina uses **vosk-model-small-en-us-0.15** (40MB) by default, which is:
+- ✅ Fast and lightweight (low CPU/memory usage)
+- ✅ Works well for clear speech
+- ✅ Suitable for servers with limited resources
+- ✅ Audio is now properly downsampled to 16kHz for optimal accuracy
+
+**Alternative Models:**
+
+If you have more powerful hardware (8+ CPU cores, 16GB+ RAM) and want better accuracy, you can manually switch to a larger model:
+
+1. Download a larger model from [Vosk Models](https://alphacephei.com/vosk/models/)
+2. Extract to `models/` directory
+3. Update `MODEL_PATH` in `transcribe.py`
+
+**Note:** Larger models (100MB+) can cause high CPU usage and transcription failures on lower-spec servers. Stick with the small model unless you have significant resources available.
+
+## GPU-Accelerated Transcription (NVIDIA GPUs)
+
+If you have an NVIDIA GPU (like the P4000), you can use **Faster-Whisper** for much better transcription:
+
+**Benefits:**
+- 🚀 **10-100x faster** than CPU transcription
+- 🎯 **Much higher accuracy** (state-of-the-art)
+- 🌍 **Better accent handling**
+- 🔇 **Better noise filtering**
+- 👥 **Better multi-speaker handling**
+
+**Setup:**
+```bash
+./setup-gpu-transcription.sh
+```
+
+Then add to your `.env` file:
+```
+TRANSCRIPTION_ENGINE=whisper
+WHISPER_MODEL=base.en
+```
+
+**Model Options:**
+- `tiny.en` - Fastest (39M params)
+- `base.en` - Recommended balance (74M params)
+- `small.en` - Very accurate (244M params)
+- `medium.en` - Best accuracy (769M params)
+
+Restart Mina after changing: `systemctl restart mina`
 
 ## Configuration
 - **Wake Words**: stored in `settings.json`. Default: `['mina', 'nina', 'tina']`.

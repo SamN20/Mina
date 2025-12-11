@@ -2,8 +2,11 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
-const PYTHON_SCRIPT = path.join(__dirname, 'transcribe.py');
-// Ensure model exists is handled by Python script mostly, but we can verify too.
+// Select transcription engine: 'vosk' or 'whisper'
+const TRANSCRIPTION_ENGINE = process.env.TRANSCRIPTION_ENGINE || 'vosk';
+const PYTHON_SCRIPT = TRANSCRIPTION_ENGINE === 'whisper' 
+    ? path.join(__dirname, 'transcribe_whisper.py')
+    : path.join(__dirname, 'transcribe.py');
 
 // Detect Python command based on OS
 // On Linux, use the venv Python to ensure vosk is available
@@ -11,6 +14,8 @@ const isWin = process.platform === 'win32';
 const PYTHON_CMD = isWin 
     ? 'python' 
     : path.join(__dirname, 'venv', 'bin', 'python3');
+
+console.log(`Transcription Engine: ${TRANSCRIPTION_ENGINE.toUpperCase()} (${PYTHON_SCRIPT})`);
 
 // Function to handle a PCM stream
 function transcribeStream(inputStream, userId, callback) {
@@ -20,7 +25,8 @@ function transcribeStream(inputStream, userId, callback) {
     // Stdout: JSON lines
 
     const pythonProcess = spawn(PYTHON_CMD, [PYTHON_SCRIPT], {
-        stdio: ['pipe', 'pipe', 'pipe']
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env }  // Pass environment variables to subprocess
     });
 
     pythonProcess.on('error', (err) => {
@@ -61,8 +67,8 @@ function transcribeStream(inputStream, userId, callback) {
     });
 
     pythonProcess.stderr.on('data', (data) => {
-        // Vosk logs to stderr
-        // optional: console.error(`[Vosk-Py User ${userId}]: ${data}`);
+        // Log stderr for debugging
+        console.error(`[Transcriber stderr ${userId}]: ${data.toString().trim()}`);
     });
 
     pythonProcess.on('close', (code) => {
@@ -78,7 +84,8 @@ function transcribeStream(inputStream, userId, callback) {
 
 function initModel() {
     // No-op for now, Python script checks model
-    console.log("Transcription Engine: Python Subprocess mode ready.");
+    const engineName = TRANSCRIPTION_ENGINE === 'whisper' ? 'Faster-Whisper (GPU)' : 'Vosk (CPU)';
+    console.log(`Transcription Engine: ${engineName} - Python Subprocess mode ready.`);
 }
 
 module.exports = {

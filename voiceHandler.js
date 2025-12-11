@@ -14,6 +14,7 @@ const storage = require('./storage');
 const tts = require('./tts');
 const gemini = require('./ai'); // Use generic provider
 const memory = require('./memory');
+const intentClassifier = require('./intentClassifier');
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ActivityType } = require('discord.js');
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -221,10 +222,11 @@ function startListening(connection, guild) {
             activeTranscriptions.delete(userId);
         });
 
-        const decoder = new prism.opus.Decoder({ rate: 48000, channels: 1, frameSize: 960 });
+        // Decode to 16kHz for better Vosk compatibility (model expects 16kHz)
+        const decoder = new prism.opus.Decoder({ rate: 16000, channels: 1, frameSize: 960 });
         decoder.on('error', (error) => { activeTranscriptions.delete(userId); });
 
-        // Pipe Opus -> PCM
+        // Pipe Opus -> PCM (16kHz)
         const pcmStream = opusStream.pipe(decoder);
         pcmStream.on('error', (error) => { activeTranscriptions.delete(userId); });
 
@@ -233,12 +235,20 @@ function startListening(connection, guild) {
         const username = member ? member.displayName : userId;
 
         transcription.transcribeStream(pcmStream, userId, (uid, text) => {
-            console.log(`${username}: ${text}`);
-            storage.saveTranscript(username, uid, text);
+            // Normalize wake word variations and classify intent
+            const processed = intentClassifier.processTranscription(text);
+            const normalizedText = processed.normalized;
+            
+            console.log(`${username}: ${normalizedText}`);
+            if (processed.intent) {
+                console.log(`[Intent] ${processed.intent} (confidence: ${(processed.confidence * 100).toFixed(0)}%)`);
+            }
+            
+            storage.saveTranscript(username, uid, normalizedText);
 
             // Only if AI is enabled
             if (storage.getAiEnabled()) {
-                const lowerText = text.toLowerCase();
+                const lowerText = normalizedText.toLowerCase();
 
                 // Dynamic AI Trigger
                 const triggers = storage.getTriggerWords();
@@ -247,24 +257,38 @@ function startListening(connection, guild) {
                 const pattern = `\\b(${escapedTriggers.join('|')})\\b`;
                 const triggerRegex = new RegExp(pattern, 'i');
 
-                const match = text.match(triggerRegex);
+                const match = normalizedText.match(triggerRegex);
 
                 if (match) {
-                    // Extract text AFTER the trigger word
-                    const triggerWord = match[0];
-                    const index = text.toLowerCase().indexOf(triggerWord.toLowerCase());
-                    const intentParser = require('./intentParser');
-                    const satelliteServer = require('./satelliteServer');
-                    // ... other imports ...
-
-                    // ... inside processAudio ...
-                    const query = text.slice(index + triggerWord.length).trim();
+                    // Use the afterWakeWord from intent classifier if available
+                    const query = processed.afterWakeWord || normalizedText.slice(match.index + match[0].length).trim();
 
                     if (query.length > 0) {
+                        // Check intent classification to decide if we should route to music or AI
+                        if (processed.intent === 'music' && processed.confidence > 0.6) {
+                            console.log(`[Intent] Music command detected, skipping AI: "${query}"`);
+                            // Try satellite control first
+                            const intentParser = require('./intentParser');
+                            const satelliteServer = require('./satelliteServer');
+                            
+                            try {
+                                const intent = intentParser.parseIntent(query);
+                                if (intent) {
+                                    console.log(`[Satellite] Intent detected: ${intent.type}`);
+                                    satelliteServer.sendIntentToUser(userId, intent);
+                                    return; // Don't trigger AI for music commands
+                                }
+                            } catch (err) {
+                                console.error('[Satellite] Error parsing intent:', err);
+                            }
+                        }
+                        
                         console.log(`[AI] Triggered by ${username}: "${query}"`);
 
                         // --- Satellite Intent Check ---
                         try {
+                            const intentParser = require('./intentParser');
+                            const satelliteServer = require('./satelliteServer');
                             const intent = intentParser.parseIntent(query);
                             if (intent) {
                                 console.log(`[Satellite] Intent detected: ${intent.type}`);

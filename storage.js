@@ -195,7 +195,7 @@ function setAiModel(model) {
 }
 
 function getTriggerWords() {
-    return settings.triggerWords || ['mina', 'nina', 'tina'];
+    return settings.triggerWords || ['mina', 'meena', 'nina', 'mean', 'mena'];
 }
 
 function setTriggerWords(words) {
