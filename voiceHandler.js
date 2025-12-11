@@ -20,6 +20,12 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
+function debugLog(...args) {
+    if (storage.getDebugMode()) {
+        console.log(...args);
+    }
+}
+
 const connections = new Map(); // GuildId -> Connection
 const activeTranscriptions = new Set(); // UserId -> Boolean (prevents duplicate streams)
 
@@ -305,7 +311,7 @@ function startListening(connection, guild) {
                             
                             try {
                                 const intent = intentParser.parseIntent(query);
-                                console.log(`[Debug] Parsed intent:`, intent);
+                                debugLog(`[Debug] Parsed intent:`, intent);
                                 if (intent) {
                                     console.log(`[Satellite] Intent detected: ${intent.type}`);
                                     
@@ -347,7 +353,7 @@ function startListening(connection, guild) {
                                         // Don't set shouldSkipAI - let AI handle it
                                     }
                                 } else {
-                                    console.log(`[Debug] Intent was null/undefined, not skipping AI`);
+                                    debugLog(`[Debug] Intent was null/undefined, not skipping AI`);
                                 }
                             } catch (err) {
                                 console.error('[Satellite] Error parsing intent:', err);
@@ -355,9 +361,9 @@ function startListening(connection, guild) {
                         }
                         
                         // Only proceed to AI if we didn't handle it as a music command
-                        console.log(`[Debug] shouldSkipAI = ${shouldSkipAI}`);
+                        debugLog(`[Debug] shouldSkipAI = ${shouldSkipAI}`);
                         if (shouldSkipAI) {
-                            console.log(`[Debug] Returning early for music command`);
+                            debugLog(`[Debug] Returning early for music command`);
                             return; // Exit early for music commands
                         }
                         

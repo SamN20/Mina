@@ -3,12 +3,30 @@
  * Determines if user wants music control or AI chat
  */
 
+const storage = require('./storage');
+
+function debugLog(...args) {
+    if (storage.getDebugMode()) {
+        console.log(...args);
+    }
+}
+
 // Music control keywords
 const MUSIC_KEYWORDS = [
     'pause', 'play', 'stop', 'skip', 'next', 'previous', 'prev', 
     'volume', 'louder', 'quieter', 'mute', 'unmute', 'shuffle',
     'repeat', 'song', 'music', 'track',
     'paz', 'paus'  // Common transcription errors for "pause"
+];
+
+// Media info question patterns (what's playing, what song, etc.)
+const MEDIA_INFO_PATTERNS = [
+    /what'?s? (playing|this song|the song|this track|this music|on)/i,
+    /what song is (this|playing|on)/i,
+    /what (song|track|music) (is |are )?(this|playing|on)/i,
+    /(tell me |what's )?(the |this )?song (name|title)/i,
+    /who'?s? (singing|playing|the artist)/i,
+    /what'?s? this (song|track|music|playing)/i
 ];
 
 // Question indicators (more likely to be AI chat)
@@ -116,6 +134,15 @@ function calculateTriggerConfidence(prefixWords, afterWakeWord) {
 function classifyIntent(text) {
     const lowerText = text.toLowerCase();
     
+    // Check for media info patterns first (high priority)
+    let isMediaInfoQuery = false;
+    for (const pattern of MEDIA_INFO_PATTERNS) {
+        if (pattern.test(text)) {
+            isMediaInfoQuery = true;
+            break;
+        }
+    }
+    
     // Count music keywords
     const musicScore = MUSIC_KEYWORDS.reduce((score, keyword) => {
         return score + (lowerText.includes(keyword) ? 1 : 0);
@@ -135,8 +162,13 @@ function classifyIntent(text) {
     const isShortCommand = words.length <= 2;
     
     // Calculate scores
-    const totalMusicScore = musicScore + (isShortCommand ? 2 : 0);
-    const totalChatScore = questionScore + questionBonus;
+    let totalMusicScore = musicScore + (isShortCommand ? 2 : 0);
+    let totalChatScore = questionScore + questionBonus;
+    
+    // CRITICAL: Media info queries are ALWAYS music, even if they're questions
+    if (isMediaInfoQuery) {
+        totalMusicScore += 10; // Heavy boost to override question indicators
+    }
     
     // Determine intent
     if (totalMusicScore > totalChatScore) {
@@ -172,17 +204,17 @@ function processTranscription(text) {
         spoken = parts.slice(1).join(':').trim();
     }
 
-    console.log(`[Debug] Original: "${text}"`);
-    console.log(`[Debug] Spoken (after strip): "${spoken}"`);
+    debugLog(`[Debug] Original: "${text}"`);
+    debugLog(`[Debug] Spoken (after strip): "${spoken}"`);
 
     const normalized = normalizeWakeWord(spoken);
-    console.log(`[Debug] Normalized: "${normalized}"`);
+    debugLog(`[Debug] Normalized: "${normalized}"`);
 
     // Only trigger if wake word appears near the start of the spoken utterance
     const wakeWordPattern = /\bmina\b/i;
     const match = normalized.match(wakeWordPattern);
     if (!match) {
-        console.log(`[Debug] No wake word found`);
+        debugLog(`[Debug] No wake word found`);
         return { normalized: normalized, intent: null, confidence: 0 };
     }
 
@@ -192,19 +224,19 @@ function processTranscription(text) {
     // Count words before the wake word - require it to be within the first 4 words
     const prefix = normalized.substring(0, matchIndex).trim();
     const prefixWords = prefix.length === 0 ? 0 : prefix.split(/\s+/).length;
-    console.log(`[Debug] Prefix: "${prefix}", prefixWords: ${prefixWords}`);
+    debugLog(`[Debug] Prefix: "${prefix}", prefixWords: ${prefixWords}`);
     
     if (prefixWords > 4) {
         // Wake word appears too deep into the sentence; ignore it to avoid false triggers
-        console.log(`[Debug] Wake word too deep (${prefixWords} words before it)`);
+        debugLog(`[Debug] Wake word too deep (${prefixWords} words before it)`);
         return { normalized: normalized, intent: null, confidence: 0 };
     }
 
     const afterWakeWord = normalized.substring(matchIndex + 4).trim();
-    console.log(`[Debug] After wake word: "${afterWakeWord}"`);
+    debugLog(`[Debug] After wake word: "${afterWakeWord}"`);
     
     if (!afterWakeWord) {
-        console.log(`[Debug] Nothing after wake word`);
+        debugLog(`[Debug] Nothing after wake word`);
         return { normalized: normalized, intent: null, confidence: 0, triggerConfidence: 0 };
     }
 

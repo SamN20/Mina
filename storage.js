@@ -78,7 +78,8 @@ let settings = {
     ghostMode: false,
     aiEnabled: true,
     aiModel: null,
-    triggerWords: ['mina', 'nina', 'tina']
+    triggerWords: ['mina', 'nina', 'tina'],
+    debugMode: false
 };
 
 // Load settings on startup
@@ -205,6 +206,15 @@ function setTriggerWords(words) {
     }
 }
 
+function getDebugMode() {
+    return settings.debugMode || false;
+}
+
+function setDebugMode(enabled) {
+    settings.debugMode = enabled;
+    saveSettings();
+}
+
 module.exports = {
     saveTranscript,
     logEvent,
@@ -228,5 +238,7 @@ module.exports = {
     getAiModel,
     setAiModel,
     getTriggerWords,
-    setTriggerWords
+    setTriggerWords,
+    getDebugMode,
+    setDebugMode
 };

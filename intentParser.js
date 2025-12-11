@@ -58,8 +58,8 @@ function parseIntent(rawText) {
         /\bwhat\s+(song|track)\s+is\s+(this|playing)\b/,
         /\bwhat\s+is\s+this\s+(song|track)\b/,
         /\bwhat\s+am\s+i\s+(listening|listening to)\b/,
-        /\bwhat(?:s| is)\s+playing\b/,
-        /\bwhat(?:s| is)\s+this\b.*\b(song|track)\b/
+        /\bwhat(?:s| is| s)\s+playing\b/,  // Handles "what's", "what is", and normalized "what s"
+        /\bwhat(?:s| is| s)\s+this\b.*\b(song|track)\b/
     ])) {
         return { type: 'MEDIA_INFO' };
     }
