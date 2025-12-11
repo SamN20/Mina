@@ -3,6 +3,7 @@ from tkinter import ttk, messagebox
 import os
 import sys
 import subprocess
+import ctypes
 
 # Check if winsdk is available
 try:
@@ -10,6 +11,13 @@ try:
     WINSDK_AVAILABLE = True
 except ImportError:
     WINSDK_AVAILABLE = False
+
+# Check if pynput is available
+try:
+    import pynput
+    PYNPUT_AVAILABLE = True
+except ImportError:
+    PYNPUT_AVAILABLE = False
 
 class SatelliteSetup:
     def __init__(self, root, on_complete=None):
@@ -23,6 +31,10 @@ class SatelliteSetup:
         script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self.config_file = os.path.join(script_dir, "config", "satellite_config.bat")
         self.load_config()
+        
+        # Check for pynput and offer to install if missing (for media controls in fullscreen games)
+        if not PYNPUT_AVAILABLE:
+            self.prompt_pynput_install()
         
         # Check for winsdk and offer to install if missing
         if not WINSDK_AVAILABLE:
@@ -50,6 +62,24 @@ class SatelliteSetup:
             except Exception as e:
                 print(f"Error loading config: {e}")
     
+    def prompt_pynput_install(self):
+        """Prompt user to install pynput if not available"""
+        response = messagebox.askyesno(
+            "Pynput Not Found",
+            "The pynput package is not installed.\n\n"
+            "This package is REQUIRED for media control commands to work "
+            "reliably, especially during fullscreen games.\n\n"
+            "Without it, media controls may not work when playing games.\n\n"
+            "Would you like to install it automatically?\n\n"
+            "Note: This will run 'pip install pynput'",
+            icon='warning'
+        )
+        
+        if response:
+            self.install_package('pynput', 
+                                'Pynput', 
+                                'Media controls will now work in fullscreen games!')
+    
     def prompt_winsdk_install(self):
         """Prompt user to install winsdk if not available"""
         response = messagebox.askyesno(
@@ -63,10 +93,12 @@ class SatelliteSetup:
         )
         
         if response:
-            self.install_winsdk()
+            self.install_package('winsdk',
+                                'Windows SDK',
+                                "The 'What's playing?' feature will now be available.")
     
-    def install_winsdk(self):
-        """Install winsdk package using pip"""
+    def install_package(self, package_name, display_name, success_message):
+        """Install a Python package using pip"""
         try:
             # Show progress message
             progress_window = tk.Toplevel(self.root)
@@ -78,7 +110,7 @@ class SatelliteSetup:
             
             tk.Label(
                 progress_window,
-                text="Installing Windows SDK...",
+                text=f"Installing {display_name}...",
                 font=("Arial", 12, "bold"),
                 pady=20
             ).pack()
@@ -95,7 +127,7 @@ class SatelliteSetup:
             
             # Run pip install
             result = subprocess.run(
-                [sys.executable, "-m", "pip", "install", "winsdk"],
+                [sys.executable, "-m", "pip", "install", package_name],
                 capture_output=True,
                 text=True,
                 timeout=300  # 5 minute timeout
@@ -106,18 +138,20 @@ class SatelliteSetup:
             if result.returncode == 0:
                 messagebox.showinfo(
                     "Success",
-                    "Windows SDK installed successfully!\n\n"
-                    "The 'What's playing?' feature will now be available."
+                    f"{display_name} installed successfully!\n\n{success_message}"
                 )
-                # Update global flag
-                global WINSDK_AVAILABLE
-                WINSDK_AVAILABLE = True
+                # Update global flags
+                global WINSDK_AVAILABLE, PYNPUT_AVAILABLE
+                if package_name == 'winsdk':
+                    WINSDK_AVAILABLE = True
+                elif package_name == 'pynput':
+                    PYNPUT_AVAILABLE = True
             else:
                 error_msg = result.stderr if result.stderr else result.stdout
                 messagebox.showerror(
                     "Installation Failed",
-                    f"Failed to install winsdk:\n\n{error_msg}\n\n"
-                    "You can install it manually later using:\npip install winsdk"
+                    f"Failed to install {package_name}:\n\n{error_msg}\n\n"
+                    f"You can install it manually later using:\npip install {package_name}"
                 )
         except subprocess.TimeoutExpired:
             if 'progress_window' in locals():
@@ -125,7 +159,7 @@ class SatelliteSetup:
             messagebox.showerror(
                 "Installation Timeout",
                 "Installation took too long and was cancelled.\n\n"
-                "Please try installing manually:\npip install winsdk"
+                f"Please try installing manually:\npip install {package_name}"
             )
         except Exception as e:
             if 'progress_window' in locals():
@@ -133,7 +167,7 @@ class SatelliteSetup:
             messagebox.showerror(
                 "Installation Error",
                 f"An error occurred during installation:\n\n{e}\n\n"
-                "You can install it manually using:\npip install winsdk"
+                f"You can install it manually using:\npip install {package_name}"
             )
     
     def create_widgets(self):
@@ -285,7 +319,22 @@ class SatelliteSetup:
                 except Exception as e:
                     messagebox.showerror("Error", f"Failed to start client: {e}")
 
+def hide_console():
+    """Hide the console window on Windows"""
+    if sys.platform == 'win32':
+        try:
+            # Get the console window handle
+            console_window = ctypes.windll.kernel32.GetConsoleWindow()
+            if console_window:
+                # Hide the window (SW_HIDE = 0)
+                ctypes.windll.user32.ShowWindow(console_window, 0)
+        except Exception as e:
+            print(f"Could not hide console: {e}")
+
 def main():
+    # Hide the console window
+    hide_console()
+    
     root = tk.Tk()
     app = SatelliteSetup(root)
     root.mainloop()

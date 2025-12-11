@@ -1,12 +1,26 @@
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
 import socketio
-import pyautogui
 import os
 import sys
 import asyncio
 import threading
 from datetime import datetime
+import ctypes
+
+try:
+    from pynput.keyboard import Key, Controller
+    keyboard = Controller()
+    PYNPUT_AVAILABLE = True
+except ImportError:
+    PYNPUT_AVAILABLE = False
+    print("Warning: pynput not available. Using fallback for media controls.")
+    try:
+        import pyautogui
+        PYAUTOGUI_AVAILABLE = True
+    except ImportError:
+        PYAUTOGUI_AVAILABLE = False
+        print("Error: Neither pynput nor pyautogui available. Media control will not work.")
 
 try:
     from winsdk.windows.media.control import GlobalSystemMediaTransportControlsSessionManager
@@ -14,6 +28,18 @@ try:
 except ImportError:
     WINSDK_AVAILABLE = False
     print("Warning: winsdk not available. 'What's playing?' feature will not work.")
+
+def hide_console():
+    """Hide the console window on Windows"""
+    if sys.platform == 'win32':
+        try:
+            # Get the console window handle
+            console_window = ctypes.windll.kernel32.GetConsoleWindow()
+            if console_window:
+                # Hide the window (SW_HIDE = 0)
+                ctypes.windll.user32.ShowWindow(console_window, 0)
+        except Exception as e:
+            print(f"Could not hide console: {e}")
 
 class SatelliteGUI:
     def __init__(self, root):
@@ -356,13 +382,28 @@ class SatelliteGUI:
             
             try:
                 if cmd == 'MEDIA_PAUSE' or cmd == 'MEDIA_PLAY':
-                    pyautogui.press('playpause')
+                    if PYNPUT_AVAILABLE:
+                        keyboard.press(Key.media_play_pause)
+                        keyboard.release(Key.media_play_pause)
+                    elif PYAUTOGUI_AVAILABLE:
+                        import pyautogui
+                        pyautogui.press('playpause')
                     self.root.after(0, lambda: self.log("Executed: Play/Pause", "SUCCESS"))
                 elif cmd == 'MEDIA_NEXT':
-                    pyautogui.press('nexttrack')
+                    if PYNPUT_AVAILABLE:
+                        keyboard.press(Key.media_next)
+                        keyboard.release(Key.media_next)
+                    elif PYAUTOGUI_AVAILABLE:
+                        import pyautogui
+                        pyautogui.press('nexttrack')
                     self.root.after(0, lambda: self.log("Executed: Next Track", "SUCCESS"))
                 elif cmd == 'MEDIA_PREV':
-                    pyautogui.press('prevtrack')
+                    if PYNPUT_AVAILABLE:
+                        keyboard.press(Key.media_previous)
+                        keyboard.release(Key.media_previous)
+                    elif PYAUTOGUI_AVAILABLE:
+                        import pyautogui
+                        pyautogui.press('prevtrack')
                     self.root.after(0, lambda: self.log("Executed: Previous Track", "SUCCESS"))
             except Exception as e:
                 self.root.after(0, lambda: self.log(f"Error executing command: {e}", "ERROR"))
@@ -392,6 +433,9 @@ class SatelliteGUI:
             self.root.after(0, lambda: self.update_status(False))
 
 def main():
+    # Hide the console window
+    hide_console()
+    
     root = tk.Tk()
     app = SatelliteGUI(root)
     root.mainloop()

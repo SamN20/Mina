@@ -1,8 +1,21 @@
 import socketio
-import pyautogui
 import os
 import sys
 import asyncio
+
+try:
+    from pynput.keyboard import Key, Controller
+    keyboard = Controller()
+    PYNPUT_AVAILABLE = True
+except ImportError:
+    PYNPUT_AVAILABLE = False
+    print("Warning: pynput not available. Using fallback for media controls.")
+    try:
+        import pyautogui
+        PYAUTOGUI_AVAILABLE = True
+    except ImportError:
+        PYAUTOGUI_AVAILABLE = False
+        print("Error: Neither pynput nor pyautogui available. Media control will not work.")
 
 try:
     from winsdk.windows.media.control import GlobalSystemMediaTransportControlsSessionManager
@@ -12,7 +25,8 @@ except ImportError:
     print("Warning: winsdk not available. 'What's playing?' feature will not work.")
 
 # Requirements:
-# pip install python-socketio[client] pyautogui winsdk
+# pip install python-socketio[client] pynput winsdk
+# (pyautogui is optional fallback)
 
 # Configuration (Edit these or pass via ENV)
 SERVER_URL = os.getenv('SATELLITE_SERVER', '') # MUST BE SET
@@ -81,17 +95,29 @@ async def on_message(data):
     print(f'[Satellite] Received Command: {cmd}')
 
     try:
-        if cmd == 'MEDIA_PAUSE':
-            pyautogui.press('playpause')
-            print("Action: Play/Pause")
-        elif cmd == 'MEDIA_PLAY':
-            pyautogui.press('playpause')
+        if cmd == 'MEDIA_PAUSE' or cmd == 'MEDIA_PLAY':
+            if PYNPUT_AVAILABLE:
+                keyboard.press(Key.media_play_pause)
+                keyboard.release(Key.media_play_pause)
+            elif PYAUTOGUI_AVAILABLE:
+                import pyautogui
+                pyautogui.press('playpause')
             print("Action: Play/Pause")
         elif cmd == 'MEDIA_NEXT':
-            pyautogui.press('nexttrack')
+            if PYNPUT_AVAILABLE:
+                keyboard.press(Key.media_next)
+                keyboard.release(Key.media_next)
+            elif PYAUTOGUI_AVAILABLE:
+                import pyautogui
+                pyautogui.press('nexttrack')
             print("Action: Next Track")
         elif cmd == 'MEDIA_PREV':
-            pyautogui.press('prevtrack')
+            if PYNPUT_AVAILABLE:
+                keyboard.press(Key.media_previous)
+                keyboard.release(Key.media_previous)
+            elif PYAUTOGUI_AVAILABLE:
+                import pyautogui
+                pyautogui.press('prevtrack')
             print("Action: Previous Track")
     except Exception as e:
         print(f"Error executing command: {e}")

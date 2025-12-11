@@ -26,31 +26,15 @@ if %errorlevel% neq 0 (
     echo This will only happen once and may take a minute...
     echo.
     
-    :: Try installing with pre-built wheels first
-    pip install python-socketio[client] pyautogui
-    
-    :: Try to install winsdk, but don't fail if it doesn't work
-    echo.
-    echo Installing Windows SDK package...
-    echo (This may fail if you don't have Visual Studio Build Tools installed)
-    echo.
-    pip install winsdk >nul 2>&1
-    
-    if %errorlevel% neq 0 (
-        echo.
-        echo WARNING: winsdk installation failed. 
-        echo The "What's playing?" feature will not work.
-        echo.
-        echo To fix this, install Visual Studio Build Tools from:
-        echo https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022
-        echo Then run this script again.
-        echo.
-        echo Press any key to continue without winsdk...
-        pause >nul
-    )
+    :: Install core dependencies
+    pip install python-socketio[client] pynput
     
     echo.
-    echo Installation complete!
+    echo Core packages installed!
+    echo.
+    echo The setup wizard will now check for optional packages...
+    echo - pynput: For media controls (especially in fullscreen games)
+    echo - winsdk: For "What's playing?" feature
     echo.
 )
 
