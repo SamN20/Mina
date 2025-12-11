@@ -239,6 +239,11 @@ function startListening(connection, guild) {
             const processed = intentClassifier.processTranscription(text);
             const normalizedText = processed.normalized;
             
+            // Log normalized result if different from original
+            if (normalizedText !== text) {
+                console.log(`[Normalized] "${text}" -> "${normalizedText}"`);
+            }
+            
             console.log(`${username}: ${normalizedText}`);
             if (processed.intent) {
                 console.log(`[Intent] ${processed.intent} (confidence: ${(processed.confidence * 100).toFixed(0)}%)`);
@@ -248,6 +253,12 @@ function startListening(connection, guild) {
 
             // Only if AI is enabled
             if (storage.getAiEnabled()) {
+                // CRITICAL: Only proceed if intent classifier validated the wake word
+                // If processed.intent is null, the classifier rejected it (no wake word, too deep, etc.)
+                if (!processed.intent) {
+                    return; // Intent classifier rejected this, don't check triggers
+                }
+
                 const lowerText = normalizedText.toLowerCase();
 
                 // Dynamic AI Trigger
@@ -263,7 +274,28 @@ function startListening(connection, guild) {
                     // Use the afterWakeWord from intent classifier if available
                     const query = processed.afterWakeWord || normalizedText.slice(match.index + match[0].length).trim();
 
+                    // Check trigger confidence and query length
+                    const triggerConfidence = processed.triggerConfidence || 1.0;
+                    const queryWords = query.trim().split(/\s+/).filter(Boolean).length;
+                    const musicIntentConfidence = processed.confidence || 0;
+                    const isMusicCommand = processed.intent === 'music' && musicIntentConfidence > 0.6;
+                    
+                    // Allow short queries if they're high-confidence music commands
+                    if (queryWords < 3 && !isMusicCommand) {
+                        console.log(`[AI] Skipped: Query too short (${queryWords} words): "${query}"`);
+                        return;
+                    }
+                    
+                    if (triggerConfidence < 0.6) {
+                        console.log(`[AI] Skipped: Low trigger confidence (${(triggerConfidence * 100).toFixed(0)}%): "${query}"`);
+                        return;
+                    }
+                    
+                    console.log(`[AI] Trigger confidence: ${(triggerConfidence * 100).toFixed(0)}%`);
+
                     if (query.length > 0) {
+                        let shouldSkipAI = false;
+                        
                         // Check intent classification to decide if we should route to music or AI
                         if (processed.intent === 'music' && processed.confidence > 0.6) {
                             console.log(`[Intent] Music command detected, skipping AI: "${query}"`);
@@ -273,64 +305,63 @@ function startListening(connection, guild) {
                             
                             try {
                                 const intent = intentParser.parseIntent(query);
+                                console.log(`[Debug] Parsed intent:`, intent);
                                 if (intent) {
                                     console.log(`[Satellite] Intent detected: ${intent.type}`);
-                                    satelliteServer.sendIntentToUser(userId, intent);
-                                    return; // Don't trigger AI for music commands
+                                    
+                                    // Check if satellite is connected
+                                    if (satelliteServer.hasConnection(userId)) {
+                                        // Handle MEDIA_INFO query specially (needs response)
+                                        if (intent.type === 'MEDIA_INFO') {
+                                            // Play thinking sound
+                                            const thinkingSound = path.join(__dirname, 'sounds', 'thinking.mp3');
+                                            if (fs.existsSync(thinkingSound)) {
+                                                playFile(guild.id, thinkingSound, 2000, 0.2);
+                                            }
+
+                                            // Query satellite for media info
+                                            satelliteServer.query(userId, 'MEDIA_INFO').then(info => {
+                                                if (info && info.title) {
+                                                    const artist = info.artist ? `by ${info.artist}` : '';
+                                                    const phrases = [
+                                                        `You're listening to ${info.title} ${artist}.`,
+                                                        `That's ${info.title} ${artist}.`,
+                                                        `Playing ${info.title}.`
+                                                    ];
+                                                    speak(guild.id, phrases[Math.floor(Math.random() * phrases.length)]);
+                                                } else {
+                                                    speak(guild.id, "I can't tell what's playing right now.");
+                                                }
+                                            });
+                                            shouldSkipAI = true;
+                                        } else {
+                                            // Standard one-way command (pause, play, skip, etc.)
+                                            satelliteServer.sendCommand(userId, intent.type);
+                                            const confirmations = ["On it.", "Sure.", "Done.", "You got it."];
+                                            const msg = confirmations[Math.floor(Math.random() * confirmations.length)];
+                                            speak(guild.id, msg);
+                                            shouldSkipAI = true;
+                                        }
+                                    } else {
+                                        console.log(`[Satellite] No connection for user ${userId}, falling back to AI.`);
+                                        // Don't set shouldSkipAI - let AI handle it
+                                    }
+                                } else {
+                                    console.log(`[Debug] Intent was null/undefined, not skipping AI`);
                                 }
                             } catch (err) {
                                 console.error('[Satellite] Error parsing intent:', err);
                             }
                         }
                         
-                        console.log(`[AI] Triggered by ${username}: "${query}"`);
-
-                        // --- Satellite Intent Check ---
-                        try {
-                            const intentParser = require('./intentParser');
-                            const satelliteServer = require('./satelliteServer');
-                            const intent = intentParser.parseIntent(query);
-                            if (intent) {
-                                console.log(`[Satellite] Intent detected: ${intent.type}`);
-
-                                if (satelliteServer.hasConnection(userId)) {
-                                    if (intent.type === 'MEDIA_INFO') {
-                                        // Async Query
-                                        const thinkingSound = path.join(__dirname, 'sounds', 'thinking.mp3');
-                                        if (fs.existsSync(thinkingSound)) {
-                                            playFile(guild.id, thinkingSound, 2000, 0.2);
-                                        }
-
-                                        satelliteServer.query(userId, 'MEDIA_INFO').then(info => {
-                                            if (info && info.title) {
-                                                const artist = info.artist ? `by ${info.artist}` : '';
-                                                const phrases = [
-                                                    `You're listening to ${info.title} ${artist}.`,
-                                                    `That's ${info.title} ${artist}.`,
-                                                    `Playing ${info.title}.`
-                                                ];
-                                                speak(guild.id, phrases[Math.floor(Math.random() * phrases.length)]);
-                                            } else {
-                                                speak(guild.id, "I can't tell what's playing right now.");
-                                            }
-                                        });
-                                        return; // Skip Gemini
-                                    } else {
-                                        // Standard One-Way Command
-                                        satelliteServer.sendCommand(userId, intent.type);
-                                        const confirmations = ["On it.", "Sure.", "Done.", "You got it."];
-                                        const msg = confirmations[Math.floor(Math.random() * confirmations.length)];
-                                        speak(guild.id, msg);
-                                        return; // Skip Gemini
-                                    }
-                                } else {
-                                    console.log(`[Satellite] No connection for user ${userId}, falling back to AI.`);
-                                }
-                            }
-                        } catch (err) {
-                            console.error("Intent parser error:", err);
+                        // Only proceed to AI if we didn't handle it as a music command
+                        console.log(`[Debug] shouldSkipAI = ${shouldSkipAI}`);
+                        if (shouldSkipAI) {
+                            console.log(`[Debug] Returning early for music command`);
+                            return; // Exit early for music commands
                         }
-                        // ------------------------------
+                        
+                        console.log(`[AI] Triggered by ${username}: "${query}"`);
 
                         // Audio Cue (Thinking Sound)
                         const thinkingSound = path.join(__dirname, 'sounds', 'thinking.mp3');

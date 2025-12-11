@@ -42,6 +42,45 @@ SAMPLE_RATE = 16000
 
 audio_buffer = b''
 
+def is_hallucination(text):
+    """Detect if transcription is likely a hallucination (repetitive patterns)"""
+    if not text or len(text) < 10:
+        return False
+    
+    words = text.lower().split()
+    if len(words) < 5:
+        return False
+    
+    # Count word frequency
+    word_counts = {}
+    for word in words:
+        word_counts[word] = word_counts.get(word, 0) + 1
+    
+    total_words = len(words)
+    
+    # Check for excessive repetition
+    for word, count in word_counts.items():
+        # If any word appears more than 40% of the time, it's likely a hallucination
+        if count / total_words > 0.4 and count > 3:
+            return True
+    
+    # Check for repetitive phrases (common hallucination patterns)
+    hallucination_phrases = [
+        'bye bye bye', 'okay okay okay', 'all right all right',
+        'next time next time', 'see you see you', 'thank you thank you',
+        'yeah yeah yeah', 'no no no', 'yes yes yes'
+    ]
+    
+    text_lower = text.lower()
+    for phrase in hallucination_phrases:
+        if phrase in text_lower:
+            # Count how many times the phrase appears
+            count = text_lower.count(phrase)
+            if count >= 2:
+                return True
+    
+    return False
+
 def transcribe_audio(audio_data):
     """Transcribe audio data using Faster-Whisper"""
     try:
@@ -64,6 +103,11 @@ def transcribe_audio(audio_data):
             text_parts.append(segment.text.strip())
         
         text = " ".join(text_parts).strip()
+        
+        # Filter out hallucinations
+        if text and is_hallucination(text):
+            print(json.dumps({"warning": "Hallucination detected, suppressing output"}), file=sys.stderr)
+            return None
         
         if text:
             return {"text": text}

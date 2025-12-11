@@ -24,31 +24,88 @@ const QUESTION_INDICATORS = [
  * @returns {string} - Normalized text with "Mina" standardized
  */
 function normalizeWakeWord(text) {
-    // Replace all variations of Mina with "Mina"
-    const variations = [
-        /\bmeena\b/gi,
-        /\bnina\b/gi,
-        /\bmena\b/gi,
-        /\bmina\s*paus/gi,  // "Mina Paus" -> "Mina pause"
-        /\bmean\s*a\b/gi,
-        /\bme\s*and\s*a\b/gi
-    ];
-
     let normalized = text;
-    
-    // Handle "Mina Paus/Paz" -> "Mina pause"
-    normalized = normalized.replace(/\b(mina|meena|nina|mean)\s*(paus|paz)\b/gi, 'Mina pause');
-    
-    // Replace other variations
-    for (const pattern of variations) {
-        normalized = normalized.replace(pattern, 'Mina');
+
+    // STEP 0: Protect conversational "mean" patterns from normalization
+    // If text starts with "I mean" or "mean," (conversational), don't normalize it
+    if (/^(I\s+)?mean[,\s]/i.test(normalized.trim())) {
+        // Check if there's a music command later - only normalize if there is
+        if (!/\b(pause|play|stop|skip|next|previous|prev)\b/i.test(normalized)) {
+            return normalized;  // Keep as-is, it's conversational
+        }
+        // If there IS a command, we still need to be careful
+        // Only normalize if the command is within the first few words after "mean"
+        const afterMean = normalized.replace(/^(I\s+)?mean[,\s]*/i, '').trim();
+        const firstWords = afterMean.split(/\s+/).slice(0, 3).join(' ');
+        if (!/\b(pause|play|stop|skip|next|previous|prev)\b/i.test(firstWords)) {
+            return normalized;  // Command too far away, keep as-is
+        }
     }
-    
-    // Normalize common command misspellings
-    normalized = normalized.replace(/\b(paz|paus)\b/gi, 'pause');
-    normalized = normalized.replace(/\bmean\s+up\b/gi, 'Mina');
+
+    // STEP 1: Handle standalone "Minae" (entire utterance) as special case for "Mina pause"
+    if (/^minae[.!?\s]*$/i.test(normalized.trim())) {
+        return 'Mina pause';
+    }
+
+    // STEP 2: Handle specific transcription errors ONLY when followed by music commands
+    // This prevents "I mean, listen..." from being normalized
+    // Order matters: do these BEFORE the general replacements
+    normalized = normalized.replace(/^mean[\s-]*a\s+(pause|play|stop|skip|next|previous|prev)/gi, 'Mina $1');
+    normalized = normalized.replace(/^mean[\s-]*up\s+(pause|play|stop|skip|next|previous|prev)/gi, 'Mina $1');
+    normalized = normalized.replace(/^meet[\s-]*up\s+(pause|play|stop|skip|next|previous|prev)/gi, 'Mina $1');
+    normalized = normalized.replace(/^meaner\s+(pause|play|stop|skip|next|previous|prev)/gi, 'Mina $1');
+
+    // STEP 3: Handle "Mina/variation + Paus/Paz" -> "Mina pause"
+    // Do this BEFORE general variation replacement
+    normalized = normalized.replace(/\b(mina|meena|nina|mena|minae)\s*(paus|paz)\b/gi, 'Mina pause');
+
+    // STEP 4: Replace general wake word variations (but NOT "mean" alone)
+    normalized = normalized.replace(/\bmeena\b/gi, 'Mina');
+    normalized = normalized.replace(/\bnina\b/gi, 'Mina');
+    normalized = normalized.replace(/\bmena\b/gi, 'Mina');
+    normalized = normalized.replace(/\bminae\b/gi, 'Mina');
+
+    // STEP 5: Normalize standalone command misspellings
+    normalized = normalized.replace(/\bpaz\b/gi, 'pause');
+    normalized = normalized.replace(/\bpaus\b/gi, 'pause');
     
     return normalized;
+}
+
+/**
+ * Calculate confidence that the wake-word trigger was intentional
+ * @param {number} prefixWords - Words before wake word
+ * @param {string} afterWakeWord - Query after wake word
+ * @returns {number} - Confidence 0-1
+ */
+function calculateTriggerConfidence(prefixWords, afterWakeWord) {
+    let confidence = 1.0;
+    
+    // Penalize if wake word appears deep in sentence
+    if (prefixWords > 0) {
+        confidence -= (prefixWords * 0.15); // -15% per word before wake
+    }
+    
+    // Boost if query has question indicators (likely intentional)
+    const hasQuestion = /\?|how|what|when|where|why|who|can you|could you|tell me/i.test(afterWakeWord);
+    if (hasQuestion) {
+        confidence += 0.2;
+    }
+    
+    // Penalize very short queries (< 3 words likely accidental)
+    const queryWords = afterWakeWord.trim().split(/\s+/).filter(Boolean).length;
+    if (queryWords < 3) {
+        confidence -= 0.3;
+    } else if (queryWords >= 5) {
+        confidence += 0.1; // Boost longer queries
+    }
+    
+    // Boost if starts with common command words
+    if (/^(play|pause|stop|skip|next|tell|what|show|can|please)/i.test(afterWakeWord)) {
+        confidence += 0.15;
+    }
+    
+    return Math.max(0, Math.min(1, confidence)); // Clamp 0-1
 }
 
 /**
@@ -107,34 +164,67 @@ function classifyIntent(text) {
  * @returns {Object} - { normalized: string, intent: string, confidence: number }
  */
 function processTranscription(text) {
-    const normalized = normalizeWakeWord(text);
-    
-    // Extract text after wake word
-    const wakeWordPattern = /\bmina\b/gi;
-    const match = wakeWordPattern.exec(normalized);
-    
-    if (!match) {
-        return { normalized, intent: null, confidence: 0 };
+    // If the text contains a speaker prefix like "Name: ...", strip it and only consider the spoken part
+    let spoken = text;
+    if (text.includes(':')) {
+        const parts = text.split(':');
+        // take everything after the first colon (handles "Name: speech")
+        spoken = parts.slice(1).join(':').trim();
     }
+
+    console.log(`[Debug] Original: "${text}"`);
+    console.log(`[Debug] Spoken (after strip): "${spoken}"`);
+
+    const normalized = normalizeWakeWord(spoken);
+    console.log(`[Debug] Normalized: "${normalized}"`);
+
+    // Only trigger if wake word appears near the start of the spoken utterance
+    const wakeWordPattern = /\bmina\b/i;
+    const match = normalized.match(wakeWordPattern);
+    if (!match) {
+        console.log(`[Debug] No wake word found`);
+        return { normalized: normalized, intent: null, confidence: 0 };
+    }
+
+    console.log(`[Debug] Wake word found at: ${match.index}`);
+
+    const matchIndex = normalized.toLowerCase().indexOf('mina');
+    // Count words before the wake word - require it to be within the first 4 words
+    const prefix = normalized.substring(0, matchIndex).trim();
+    const prefixWords = prefix.length === 0 ? 0 : prefix.split(/\s+/).length;
+    console.log(`[Debug] Prefix: "${prefix}", prefixWords: ${prefixWords}`);
     
-    const afterWakeWord = normalized.substring(match.index + match[0].length).trim();
+    if (prefixWords > 4) {
+        // Wake word appears too deep into the sentence; ignore it to avoid false triggers
+        console.log(`[Debug] Wake word too deep (${prefixWords} words before it)`);
+        return { normalized: normalized, intent: null, confidence: 0 };
+    }
+
+    const afterWakeWord = normalized.substring(matchIndex + 4).trim();
+    console.log(`[Debug] After wake word: "${afterWakeWord}"`);
     
     if (!afterWakeWord) {
-        return { normalized, intent: null, confidence: 0 };
+        console.log(`[Debug] Nothing after wake word`);
+        return { normalized: normalized, intent: null, confidence: 0, triggerConfidence: 0 };
     }
-    
+
+    // Calculate trigger confidence
+    const triggerConfidence = calculateTriggerConfidence(prefixWords, afterWakeWord);
+
     const classification = classifyIntent(afterWakeWord);
-    
+
     return {
         normalized,
         afterWakeWord,
         intent: classification.intent,
-        confidence: classification.confidence
+        confidence: classification.confidence,
+        triggerConfidence: triggerConfidence
     };
 }
 
 module.exports = {
     normalizeWakeWord,
     classifyIntent,
+    calculateTriggerConfidence,
     processTranscription
 };
