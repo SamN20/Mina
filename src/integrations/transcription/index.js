@@ -4,16 +4,16 @@ const fs = require('fs');
 
 // Select transcription engine: 'vosk' or 'whisper'
 const TRANSCRIPTION_ENGINE = process.env.TRANSCRIPTION_ENGINE || 'vosk';
-const PYTHON_SCRIPT = TRANSCRIPTION_ENGINE === 'whisper' 
+const PYTHON_SCRIPT = TRANSCRIPTION_ENGINE === 'whisper'
     ? path.join(__dirname, 'transcribe_whisper.py')
     : path.join(__dirname, 'transcribe.py');
 
 // Detect Python command based on OS
 // On Linux, use the venv Python to ensure vosk is available
 const isWin = process.platform === 'win32';
-const PYTHON_CMD = isWin 
-    ? 'python' 
-    : path.join(__dirname, 'venv', 'bin', 'python3');
+const PYTHON_CMD = isWin
+    ? 'python'
+    : path.join(process.cwd(), 'venv', 'bin', 'python3');
 
 console.log(`Transcription Engine: ${TRANSCRIPTION_ENGINE.toUpperCase()} (${PYTHON_SCRIPT})`);
 

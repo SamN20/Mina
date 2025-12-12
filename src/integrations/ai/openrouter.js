@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const storage = require('../storage');
+const storage = require('../../core/storage');
 
 const FALLBACK_MODEL = 'meta-llama/llama-3.3-70b-instruct:free';
 

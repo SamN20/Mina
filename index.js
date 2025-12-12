@@ -3,10 +3,12 @@ const fs = require('fs');
 const path = require('path');
 const { Client, Collection, Events, GatewayIntentBits, ActivityType } = require('discord.js');
 const http = require('http'); // For Socket.io
-const satelliteServer = require('./satelliteServer');
-const voiceHandler = require('./voiceHandler');
-const storage = require('./storage');
-const reminders = require('./reminders');
+const satelliteServer = require('./src/integrations/satellite');
+const voiceHandler = require('./src/core/voice/handler');
+const storage = require('./src/core/storage');
+const reminders = require('./src/features/reminders/store');
+const scheduler = require('./src/features/reminders/scheduler');
+require('./src/features'); // Load all features (Commands)
 
 // Satellite Server Setup
 const server = http.createServer((req, res) => {
@@ -25,7 +27,7 @@ if (!process.env.DISCORD_TOKEN) {
 }
 
 // 1. Setup Model (Async check, we assume it's there or user ran setup)
-const transcription = require('./transcription');
+const transcription = require('./src/integrations/transcription');
 try {
     transcription.initModel();
 } catch (e) {
@@ -69,7 +71,7 @@ client.once(Events.ClientReady, c => {
                 const member = guild.members.cache.get(reminder.userId);
                 if (member) {
                     // Schedule the reminder for this guild
-                    voiceHandler.scheduleReminder(c, guild.id, reminder.userId, reminder);
+                    scheduler.scheduleReminder(c, guild.id, reminder.userId, reminder);
                     break; // Found the guild, no need to check others
                 }
             } catch (e) {

@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, ActionRowBuilder, StringSelectMenuBuilder } = require('discord.js');
-const storage = require('../storage');
-const edge = require('../tts/engines/edge');
-const azure = require('../tts/engines/azure');
+const storage = require('../src/core/storage');
+const edge = require('../src/integrations/tts/engines/edge');
+const azure = require('../src/integrations/tts/engines/azure');
 
 module.exports = {
     data: new SlashCommandBuilder()

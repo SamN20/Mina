@@ -1,13 +1,13 @@
 const fs = require('fs');
 const path = require('path');
-const ai = require('./ai'); // Use generic AI provider for learning
+const ai = require('../../integrations/ai'); // Use generic AI provider for learning
 
-const MEMORY_FILE = path.join(__dirname, 'data', 'memory.json');
-const MEMORY_LOG_FILE = path.join(__dirname, 'data', 'memory.log');
+const MEMORY_FILE = path.join(process.cwd(), 'data', 'memory.json');
+const MEMORY_LOG_FILE = path.join(process.cwd(), 'data', 'memory.log');
 
 // Ensure data dir exists
-if (!fs.existsSync(path.join(__dirname, 'data'))) {
-    fs.mkdirSync(path.join(__dirname, 'data'));
+if (!fs.existsSync(path.join(process.cwd(), 'data'))) {
+    fs.mkdirSync(path.join(process.cwd(), 'data'));
 }
 
 let memory = {};

@@ -1,5 +1,5 @@
 const { SlashCommandBuilder } = require('discord.js');
-const storage = require('../storage');
+const storage = require('../src/core/storage');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
@@ -42,7 +42,7 @@ module.exports = {
         await interaction.deferReply({ ephemeral: true });
 
         // Ensure directory exists
-        const soundsDir = path.resolve(__dirname, '../sounds');
+        const soundsDir = path.resolve(__dirname, '../data/sounds');
         if (!fs.existsSync(soundsDir)) {
             fs.mkdirSync(soundsDir, { recursive: true });
         }

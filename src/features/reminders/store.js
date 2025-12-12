@@ -1,11 +1,11 @@
 const fs = require('fs');
 const path = require('path');
 
-const REMINDERS_FILE = path.join(__dirname, 'data', 'reminders.json');
+const REMINDERS_FILE = path.join(process.cwd(), 'data', 'reminders.json');
 
 // Ensure data dir exists
-if (!fs.existsSync(path.join(__dirname, 'data'))) {
-    fs.mkdirSync(path.join(__dirname, 'data'));
+if (!fs.existsSync(path.join(process.cwd(), 'data'))) {
+    fs.mkdirSync(path.join(process.cwd(), 'data'));
 }
 
 let reminders = [];

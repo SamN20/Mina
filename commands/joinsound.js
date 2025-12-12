@@ -1,10 +1,10 @@
 const { SlashCommandBuilder } = require('discord.js');
-const storage = require('../storage');
+const storage = require('../src/core/storage');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
 
-const THEMES_DIR = path.join(__dirname, '../sounds/themes');
+const THEMES_DIR = path.join(__dirname, '../data/sounds/themes');
 if (!fs.existsSync(THEMES_DIR)) {
     fs.mkdirSync(THEMES_DIR, { recursive: true });
 }

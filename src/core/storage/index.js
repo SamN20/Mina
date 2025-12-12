@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const BASE_DIR = path.join(__dirname, 'transcripts');
+const BASE_DIR = path.join(process.cwd(), 'data', 'transcripts');
 
 if (!fs.existsSync(BASE_DIR)) {
     fs.mkdirSync(BASE_DIR, { recursive: true });
@@ -67,7 +67,8 @@ function logEvent(username, userId, eventType) {
     });
 }
 
-const SETTINGS_FILE = path.join(__dirname, 'settings.json');
+const SETTINGS_FILE = path.join(process.cwd(), 'data', 'settings.json');
+const LOGS_DIR = path.join(process.cwd(), 'data', 'logs');
 let settings = {
     optedOut: [],
     voiceSettings: {},

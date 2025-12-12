@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
-const memory = require('../memory');
+const memory = require('../src/core/memory');
 
 module.exports = {
     data: new SlashCommandBuilder()

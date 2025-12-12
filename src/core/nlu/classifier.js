@@ -3,7 +3,7 @@
  * Determines if user wants music control or AI chat
  */
 
-const storage = require('./storage');
+const storage = require('../storage');
 
 function debugLog(...args) {
     if (storage.getDebugMode()) {
@@ -13,7 +13,7 @@ function debugLog(...args) {
 
 // Music control keywords
 const MUSIC_KEYWORDS = [
-    'pause', 'play', 'stop', 'skip', 'next', 'previous', 'prev', 
+    'pause', 'play', 'stop', 'skip', 'next', 'previous', 'prev',
     'volume', 'louder', 'quieter', 'mute', 'unmute', 'shuffle',
     'repeat', 'song', 'music', 'track',
     'paz', 'paus'  // Common transcription errors for "pause"
@@ -86,7 +86,7 @@ function normalizeWakeWord(text) {
     // STEP 5: Normalize standalone command misspellings
     normalized = normalized.replace(/\bpaz\b/gi, 'pause');
     normalized = normalized.replace(/\bpaus\b/gi, 'pause');
-    
+
     return normalized;
 }
 
@@ -98,18 +98,18 @@ function normalizeWakeWord(text) {
  */
 function calculateTriggerConfidence(prefixWords, afterWakeWord) {
     let confidence = 1.0;
-    
+
     // Penalize if wake word appears deep in sentence
     if (prefixWords > 0) {
         confidence -= (prefixWords * 0.15); // -15% per word before wake
     }
-    
+
     // Boost if query has question indicators (likely intentional)
     const hasQuestion = /\?|how|what|when|where|why|who|can you|could you|tell me/i.test(afterWakeWord);
     if (hasQuestion) {
         confidence += 0.2;
     }
-    
+
     // Penalize very short queries (< 3 words likely accidental)
     const queryWords = afterWakeWord.trim().split(/\s+/).filter(Boolean).length;
     if (queryWords < 3) {
@@ -117,12 +117,12 @@ function calculateTriggerConfidence(prefixWords, afterWakeWord) {
     } else if (queryWords >= 5) {
         confidence += 0.1; // Boost longer queries
     }
-    
+
     // Boost if starts with common command words
     if (/^(play|pause|stop|skip|next|tell|what|show|can|please)/i.test(afterWakeWord)) {
         confidence += 0.15;
     }
-    
+
     return Math.max(0, Math.min(1, confidence)); // Clamp 0-1
 }
 
@@ -133,7 +133,7 @@ function calculateTriggerConfidence(prefixWords, afterWakeWord) {
  */
 function classifyIntent(text) {
     const lowerText = text.toLowerCase();
-    
+
     // Check for media info patterns first (high priority)
     let isMediaInfoQuery = false;
     for (const pattern of MEDIA_INFO_PATTERNS) {
@@ -142,34 +142,34 @@ function classifyIntent(text) {
             break;
         }
     }
-    
+
     // Count music keywords
     const musicScore = MUSIC_KEYWORDS.reduce((score, keyword) => {
         return score + (lowerText.includes(keyword) ? 1 : 0);
     }, 0);
-    
+
     // Count question indicators
     const questionScore = QUESTION_INDICATORS.reduce((score, indicator) => {
         return score + (lowerText.includes(indicator) ? 1 : 0);
     }, 0);
-    
+
     // Check for punctuation (questions are more likely AI)
     const hasQuestion = lowerText.includes('?');
     const questionBonus = hasQuestion ? 2 : 0;
-    
+
     // Very short commands (1-2 words) are usually music
     const words = text.trim().split(/\s+/);
     const isShortCommand = words.length <= 2;
-    
+
     // Calculate scores
     let totalMusicScore = musicScore + (isShortCommand ? 2 : 0);
     let totalChatScore = questionScore + questionBonus;
-    
+
     // CRITICAL: Media info queries are ALWAYS music, even if they're questions
     if (isMediaInfoQuery) {
         totalMusicScore += 10; // Heavy boost to override question indicators
     }
-    
+
     // Determine intent
     if (totalMusicScore > totalChatScore) {
         return {
@@ -225,7 +225,7 @@ function processTranscription(text) {
     const prefix = normalized.substring(0, matchIndex).trim();
     const prefixWords = prefix.length === 0 ? 0 : prefix.split(/\s+/).length;
     debugLog(`[Debug] Prefix: "${prefix}", prefixWords: ${prefixWords}`);
-    
+
     if (prefixWords > 4) {
         // Wake word appears too deep into the sentence; ignore it to avoid false triggers
         debugLog(`[Debug] Wake word too deep (${prefixWords} words before it)`);
@@ -234,7 +234,7 @@ function processTranscription(text) {
 
     const afterWakeWord = normalized.substring(matchIndex + 4).trim();
     debugLog(`[Debug] After wake word: "${afterWakeWord}"`);
-    
+
     if (!afterWakeWord) {
         debugLog(`[Debug] Nothing after wake word`);
         return { normalized: normalized, intent: null, confidence: 0, triggerConfidence: 0 };
@@ -353,13 +353,13 @@ function parseTime(timeStr) {
     const unitRegex = /(\d+)\s*(minute|min|hour|hr|day|week|second|sec)s?/gi;
     let hasDuration = false;
     let match;
-    
+
     // Scan for all duration parts
     while ((match = unitRegex.exec(timeStr)) !== null) {
         hasDuration = true;
         const amount = parseInt(match[1]);
         const unit = match[2].toLowerCase();
-        
+
         switch (unit) {
             case 'second':
             case 'sec':
@@ -381,7 +381,7 @@ function parseTime(timeStr) {
                 break;
         }
     }
-    
+
     if (hasDuration) return targetTime;
 
     // Handle "at X" - simple time parsing
@@ -400,7 +400,7 @@ function parseTime(timeStr) {
             // But duration regex handles units.
             // Assume it's time if it's in a time context, but be careful.
             // For now, require at least one indicator if "at" is missing.
-            return null; 
+            return null;
         }
 
         let hour = parseInt(atMatch[1]);

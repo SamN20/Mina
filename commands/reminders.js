@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const reminders = require('../reminders');
+const reminders = require('../src/features/reminders/store');
 
 module.exports = {
     data: new SlashCommandBuilder()
