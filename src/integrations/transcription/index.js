@@ -17,20 +17,49 @@ const PYTHON_CMD = isWin
 
 console.log(`Transcription Engine: ${TRANSCRIPTION_ENGINE.toUpperCase()} (${PYTHON_SCRIPT})`);
 
+// Track active Python processes for cleanup
+const activeProcesses = new Map(); // userId -> pythonProcess
+
 // Function to handle a PCM stream
-function transcribeStream(inputStream, userId, callback) {
+function transcribeStream(inputStream, userId, callback, model = null) {
     // Spawn python process
     // python transcribe.py
     // Stdin: PCM data
     // Stdout: JSON lines
 
+    const env = { ...process.env };
+    if (model) env.WHISPER_MODEL = model;
+
+    // Kill any existing process for this user (cleanup orphaned processes)
+    if (activeProcesses.has(userId)) {
+        const oldProcess = activeProcesses.get(userId);
+        try {
+            oldProcess.kill('SIGKILL');
+        } catch (e) { }
+        activeProcesses.delete(userId);
+    }
+
     const pythonProcess = spawn(PYTHON_CMD, [PYTHON_SCRIPT], {
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env }  // Pass environment variables to subprocess
+        env: env  // Pass environment variables to subprocess
     });
+
+    // Store process reference for cleanup
+    activeProcesses.set(userId, pythonProcess);
+
+    // Set a timeout to kill stuck processes (5 minutes max)
+    const processTimeout = setTimeout(() => {
+        console.log(`[Transcriber] Process timeout for ${userId}, killing...`);
+        try {
+            pythonProcess.kill('SIGKILL');
+        } catch (e) { }
+        activeProcesses.delete(userId);
+    }, 5 * 60 * 1000);
 
     pythonProcess.on('error', (err) => {
         console.error(`timestamp: ${Date.now()} - Failed to spawn python process for user ${userId}:`, err);
+        clearTimeout(processTimeout);
+        activeProcesses.delete(userId);
     });
 
     // Pipe input audio to python stdin
@@ -73,13 +102,22 @@ function transcribeStream(inputStream, userId, callback) {
 
     pythonProcess.on('close', (code) => {
         console.log(`Transcriber process for ${userId} exited with code ${code}`);
+        clearTimeout(processTimeout);
+        activeProcesses.delete(userId);
     });
 
     // Handle stream end
     inputStream.on('end', () => {
         // Close stdin to tell python we are done
-        pythonProcess.stdin.end();
+        try {
+            pythonProcess.stdin.end();
+        } catch (e) {
+            console.error(`[Transcriber] Error ending stdin for ${userId}:`, e);
+        }
     });
+
+    // Return process reference so it can be killed externally if needed
+    return pythonProcess;
 }
 
 function initModel() {
@@ -88,7 +126,32 @@ function initModel() {
     console.log(`Transcription Engine: ${engineName} - Python Subprocess mode ready.`);
 }
 
+function killProcess(userId) {
+    if (activeProcesses.has(userId)) {
+        const process = activeProcesses.get(userId);
+        try {
+            process.kill('SIGKILL');
+            console.log(`[Transcriber] Killed process for ${userId}`);
+        } catch (e) {
+            console.error(`[Transcriber] Error killing process for ${userId}:`, e);
+        }
+        activeProcesses.delete(userId);
+    }
+}
+
+function killAllProcesses() {
+    console.log(`[Transcriber] Killing ${activeProcesses.size} active processes...`);
+    for (const [userId, process] of activeProcesses.entries()) {
+        try {
+            process.kill('SIGKILL');
+        } catch (e) { }
+    }
+    activeProcesses.clear();
+}
+
 module.exports = {
     initModel,
-    transcribeStream
+    transcribeStream,
+    killProcess,
+    killAllProcesses
 };

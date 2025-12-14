@@ -20,6 +20,7 @@ const path = require('path');
 
 // State Maps (Reduced)
 const activeTranscriptions = new Set(); // UserId
+const activeStreams = new Map(); // userId -> { opusStream, pcmStream, pythonProcess }
 // Chatterbox stuff
 const chatterCooldowns = new Map();
 const COOLDOWN_MS = 10000;
@@ -35,6 +36,7 @@ module.exports = {
     leaveChannel,
     playFile: audio.playFile, // Proxy
     speak: audio.speak,       // Proxy
+    stopTTS: audio.stopTTS,   // Proxy
     scheduleReminder: scheduler.scheduleReminder,
     getBotChannelId: function (guildId) {
         const conn = audio.getConnection(guildId);
@@ -106,6 +108,36 @@ async function joinChannel(interaction) {
 }
 
 async function leaveChannel(guildId) {
+    // Clean up all active transcription streams and processes for this guild
+    console.log(`[Voice] Cleaning up transcriptions for guild ${guildId}`);
+    
+    // Kill all active streams and processes
+    for (const [userId, streamData] of activeStreams.entries()) {
+        try {
+            // Destroy streams
+            if (streamData.pcmStream && !streamData.pcmStream.destroyed) {
+                streamData.pcmStream.destroy();
+            }
+            if (streamData.opusStream && !streamData.opusStream.destroyed) {
+                streamData.opusStream.destroy();
+            }
+            
+            // Kill Python process
+            if (streamData.pythonProcess && !streamData.pythonProcess.killed) {
+                streamData.pythonProcess.kill('SIGKILL');
+            }
+        } catch (e) {
+            console.error(`[Voice] Error cleaning up streams for ${userId}:`, e);
+        }
+    }
+    
+    // Clear tracking
+    activeStreams.clear();
+    activeTranscriptions.clear();
+    
+    // Use transcription module's cleanup as well
+    transcription.killAllProcesses();
+    
     return audio.leave(guildId);
 }
 
@@ -124,19 +156,62 @@ function startListening(connection, guild) {
             end: { behavior: EndBehaviorType.AfterSilence, duration: 1000 },
         });
 
-        opusStream.on('error', () => activeTranscriptions.delete(userId));
-
         const decoder = new prism.opus.Decoder({ rate: 16000, channels: 1, frameSize: 960 });
         const pcmStream = opusStream.pipe(decoder);
 
-        pcmStream.on('error', () => activeTranscriptions.delete(userId));
-        pcmStream.on('close', () => activeTranscriptions.delete(userId));
-        pcmStream.on('end', () => activeTranscriptions.delete(userId));
+        // Cleanup helper - DON'T kill the Python process, let it finish naturally
+        const cleanup = () => {
+            activeTranscriptions.delete(userId);
+            
+            // Just remove from tracking - Python process will exit naturally when stdin closes
+            activeStreams.delete(userId);
+
+            // Destroy streams
+            try {
+                if (pcmStream && !pcmStream.destroyed) pcmStream.destroy();
+                if (opusStream && !opusStream.destroyed) opusStream.destroy();
+            } catch (e) { }
+        };
+
+        // Only cleanup streams on error, not on normal end
+        opusStream.on('error', (err) => {
+            console.error(`[OpusStream Error] ${userId}:`, err);
+            cleanup();
+            // Kill process on error
+            if (activeStreams.has(userId)) {
+                const { pythonProcess } = activeStreams.get(userId);
+                try {
+                    if (pythonProcess && !pythonProcess.killed) pythonProcess.kill('SIGKILL');
+                } catch (e) { }
+            }
+        });
+
+        pcmStream.on('error', (err) => {
+            console.error(`[PCMStream Error] ${userId}:`, err);
+            cleanup();
+            // Kill process on error
+            if (activeStreams.has(userId)) {
+                const { pythonProcess } = activeStreams.get(userId);
+                try {
+                    if (pythonProcess && !pythonProcess.killed) pythonProcess.kill('SIGKILL');
+                } catch (e) { }
+            }
+        });
+        
+        // On normal end, just cleanup streams and let Python finish
+        pcmStream.on('close', () => cleanup());
+        pcmStream.on('end', () => cleanup());
 
         const member = guild.members.cache.get(userId);
         const username = member ? member.displayName : userId;
 
-        transcription.transcribeStream(pcmStream, userId, async (uid, text) => {
+        // Choose model based on number of people in call
+        const channel = guild.channels.cache.get(connection.joinConfig.channelId);
+        const numMembers = channel ? channel.members.size : 1;
+        const model = numMembers > 3 ? 'tiny.en' : 'base.en';
+        console.log(`Using Whisper model: ${model} (${numMembers} members in channel)`);
+
+        const pythonProcess = transcription.transcribeStream(pcmStream, userId, async (uid, text) => {
             // Save Transcript (Restored)
             storage.saveTranscript(username, uid, text);
 
@@ -188,5 +263,8 @@ function startListening(connection, guild) {
                 }
             }
         });
+
+        // Store references for cleanup
+        activeStreams.set(userId, { opusStream, pcmStream, pythonProcess });
     });
 }

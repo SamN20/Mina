@@ -41,7 +41,7 @@ async function generateResponse(prompt) {
     // Load Personality
     let systemInstruction = "You are a helpful assistant.";
     try {
-        const configPath = path.join(__dirname, '../ai_config.txt');
+        const configPath = path.join(__dirname, '../../../ai_config.txt');
         if (fs.existsSync(configPath)) {
             systemInstruction = fs.readFileSync(configPath, 'utf8');
         }

@@ -24,6 +24,7 @@ module.exports = {
     leave,
     speak,
     playFile,
+    stopTTS,
     getConnection,
     getVoiceConnectionStatus: VoiceConnectionStatus
 };
@@ -103,6 +104,34 @@ function cleanTempFiles() {
         }
     });
     tempFiles = [];
+}
+
+/**
+ * Stop current TTS or clear queue
+ * @param {string} guildId 
+ * @param {boolean} clearQueue - If true, clear entire queue
+ * @returns {boolean} - True if something was stopped
+ */
+function stopTTS(guildId, clearQueue = false) {
+    const player = activePlayers.get(guildId);
+    const queue = ttsQueues.get(guildId) || [];
+    
+    if (clearQueue) {
+        // Clear the queue
+        ttsQueues.set(guildId, []);
+        console.log(`[Audio] Cleared TTS queue for guild ${guildId}`);
+    }
+    
+    if (player) {
+        // Stop current player
+        player.stop();
+        activePlayers.delete(guildId);
+        isSpeaking.set(guildId, false);
+        console.log(`[Audio] Stopped current TTS for guild ${guildId}`);
+        return true;
+    }
+    
+    return clearQueue; // Return true if we cleared queue even if no player was active
 }
 
 /**
