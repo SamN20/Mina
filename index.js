@@ -1,13 +1,15 @@
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
-const { Client, Collection, Events, GatewayIntentBits, ActivityType } = require('discord.js');
+const { Client, Collection, Events, GatewayIntentBits, ActivityType, ChannelType, Partials } = require('discord.js');
 const http = require('http'); // For Socket.io
 const satelliteServer = require('./src/integrations/satellite');
 const voiceHandler = require('./src/core/voice/handler');
+const audio = require('./src/integrations/discord/audio');
 const storage = require('./src/core/storage');
 const reminders = require('./src/features/reminders/store');
 const scheduler = require('./src/features/reminders/scheduler');
+const intentClassifier = require('./src/core/nlu/classifier');
 require('./src/features'); // Load all features (Commands)
 
 // Satellite Server Setup
@@ -38,8 +40,10 @@ try {
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildVoiceStates
-    ]
+        GatewayIntentBits.GuildVoiceStates,
+        GatewayIntentBits.DirectMessages
+    ],
+    partials: [Partials.Channel] // Required for DMs
 });
 
 client.commands = new Collection();
@@ -231,22 +235,34 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
         const joinSound = storage.getJoinSound(userId);
         const genericJoin = path.join(process.cwd(), 'data', 'sounds', 'join.mp3');
 
-        if (joinSound) {
-            console.log(`[Theme] Playing join sound for ${username}`);
-            // Small delay to ensure connection is stable and user can hear it
-            setTimeout(() => {
-                voiceHandler.playFile(guildId, joinSound, 5000, 0.5, true); // Max 5000ms, 0.5 Volume, Queued
-            }, 2000);
-        } else if (fs.existsSync(genericJoin)) {
-             setTimeout(() => {
-                voiceHandler.playFile(guildId, genericJoin, 0, 0.5, true); // Queued
-            }, 1000);
-        }
+        // Async Sequence for Join Events
+        (async () => {
+            // 1. Wait for connection stability
+            await new Promise(r => setTimeout(r, 1500));
 
-        // Small delay to let join sound play before greeting user
-        setTimeout(() => {
-            voiceHandler.greetNewUser(newState.guild.id, userId, newState.member);
-        }, 4000);
+            // 2. Play Join Sound (Queued)
+            if (joinSound) {
+                console.log(`[Theme] Playing join sound for ${username}`);
+                voiceHandler.playFile(guildId, joinSound, 5000, 0.5, true);
+            } else if (fs.existsSync(genericJoin)) {
+                voiceHandler.playFile(guildId, genericJoin, 0, 0.5, true);
+            }
+
+            // 3. Greet User (Queued)
+            // Wait a tiny bit to ensure the file play command hit the queue first
+            await new Promise(r => setTimeout(r, 500));
+            await voiceHandler.greetNewUser(newState.guild.id, userId, newState.member);
+
+            // 4. Play Reminders (Queued)
+            const pendingReminders = reminders.getAndRemoveTriggeredReminders(userId, 'on_join');
+            if (pendingReminders.length > 0) {
+                console.log(`[Reminders] Found ${pendingReminders.length} on-join reminders for ${username}`);
+                for (const r of pendingReminders) {
+                    // Speak adds to queue automatically
+                    voiceHandler.speak(guildId, `By the way, you asked me to remind you: ${r.message}`);
+                }
+            }
+        })();
     }
     // User Left Bot's Channel
     else if (oldState.channelId && oldState.channelId === botChannelId) {
@@ -278,58 +294,150 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
     // Ghost Mode Logic (Bot NOT in channel)
     // Only if botChannelId is null (bot not connected to this guild)
     else if (!botChannelId && storage.getGhostMode()) {
-        console.log(`[Ghost] Checking ghost action for ${userId}`);
-        const { joinVoiceChannel, createAudioPlayer, createAudioResource, VoiceConnectionStatus } = require('@discordjs/voice');
+        const { entersState, VoiceConnectionStatus } = require('@discordjs/voice');
 
-        // Helper to quick join-play-leave
-        const playGhostSound = async (channel, soundPath) => {
-            if (!soundPath || !fs.existsSync(soundPath)) return;
-
-            console.log(`[Ghost] Joining ${channel.name} to play sound...`);
+        // Helper for Ghost Actions
+        const performGhostAction = async (channel, actions) => {
+            console.log(`[Ghost] Joining ${channel.name}...`);
             try {
-                const connection = joinVoiceChannel({
-                    channelId: channel.id,
-                    guildId: channel.guild.id,
-                    adapterCreator: channel.guild.voiceAdapterCreator,
-                    selfDeaf: false,
-                    selfMute: false,
-                    daveEncryption: false
-                });
+                // Join using main audio system
+                const connection = audio.join(channel);
+                
+                // Wait for Ready
+                await entersState(connection, VoiceConnectionStatus.Ready, 5000);
 
-                connection.once(VoiceConnectionStatus.Ready, () => {
-                    const player = createAudioPlayer();
-                    const resource = createAudioResource(soundPath, { inlineVolume: true });
-                    resource.volume.setVolume(0.5);
-                    player.play(resource);
-                    connection.subscribe(player);
+                // Execute Actions sequentially
+                for (const action of actions) {
+                    if (action.type === 'file') {
+                        // Use queue=true to get the Promise
+                        await voiceHandler.playFile(guildId, action.path, 5000, 0.5, true);
+                    } else if (action.type === 'speak') {
+                        await voiceHandler.speak(guildId, action.text);
+                    }
+                }
 
-                    // Disconnect after playback (+ buffer)
-                    setTimeout(() => {
-                        try { connection.destroy(); } catch (e) { }
-                    }, 5500);
-                });
+                // Leave
+                await new Promise(r => setTimeout(r, 500)); // Small buffer
+                audio.leave(guildId);
+
             } catch (e) {
-                console.error("Ghost Mode Error:", e);
+                console.error("[Ghost] Error:", e);
+                audio.leave(guildId);
             }
         };
 
         // Ghost JOIN
         if (newState.channelId) {
             const joinSound = storage.getJoinSound(userId);
-            if (joinSound) {
-                const channel = newState.channel;
-                if (channel) playGhostSound(channel, joinSound);
+            const pendingReminders = reminders.getAndRemoveTriggeredReminders(userId, 'on_join');
+            
+            if (joinSound || pendingReminders.length > 0) {
+                const actions = [];
+                if (joinSound) actions.push({ type: 'file', path: joinSound });
+                
+                for (const r of pendingReminders) {
+                    actions.push({ type: 'speak', text: `By the way, you asked me to remind you: ${r.message}` });
+                }
+                
+                performGhostAction(newState.channel, actions);
             }
         }
         // Ghost LEAVE
         else if (oldState.channelId) {
             const leaveSound = storage.getLeaveSound(userId);
             if (leaveSound) {
-                const channel = oldState.channel;
-                if (channel) playGhostSound(channel, leaveSound);
+                performGhostAction(oldState.channel, [{ type: 'file', path: leaveSound }]);
             }
         }
     }
+});
+
+// Event: Message Create (DM Handling)
+client.on(Events.MessageCreate, async message => {
+    if (message.author.bot) return;
+    if (message.channel.type !== ChannelType.DM) return;
+
+    console.log(`[DM] Received from ${message.author.tag}: ${message.content}`);
+
+    const text = message.content;
+    const userId = message.author.id;
+
+    // 1. Check for "On Join" Reminder
+    // Pattern: "remind me next time I join (to|that) X"
+    if (/remind me (next time|when) I join/i.test(text)) {
+        const match = text.match(/remind me (?:next time|when) I join (?:to |that )?(.*)/i);
+        if (match) {
+            const reminderText = match[1];
+            reminders.addReminder(userId, reminderText, null, 'on_join');
+            return message.reply(`Okay, I'll remind you "${reminderText}" the next time you join a voice channel I'm in.`);
+        }
+    }
+
+    // 2. Check for Time-based Reminder
+    const reminderData = intentClassifier.parseReminder(text);
+    if (reminderData) {
+        const reminder = reminders.addReminder(userId, reminderData.message, reminderData.remindAt, 'time');
+        
+        // Schedule it immediately if possible (though scheduler usually needs a guild context)
+        // The scheduler.scheduleReminder function takes (client, guildId, userId, reminder)
+        // Since this is a DM, we don't have a guildId.
+        // However, the scheduler iterates over guilds to find the user when the timer fires.
+        // But we need to register the timeout in memory.
+        
+        // We can try to find a mutual guild to schedule it on?
+        // Or update scheduler to handle DM-set reminders?
+        // The current scheduler.scheduleReminder implementation:
+        /*
+        function scheduleReminder(client, guildId, userId, reminder) {
+            ...
+            const job = setTimeout(() => {
+                // Execute reminder (speak in voice)
+                const conn = audio.getConnection(guildId);
+                if (conn) ...
+            }, delay);
+        }
+        */
+        
+        // If we don't pass a guildId, the scheduler won't know where to speak.
+        // But we can iterate all guilds the bot is in, find where the user is connected?
+        // For now, let's just save it. The `index.js` startup loop schedules active reminders.
+        // But we need to schedule it dynamically for *now*.
+        
+        // Let's try to find a guild the user is currently in voice for?
+        let scheduled = false;
+        for (const guild of client.guilds.cache.values()) {
+            const member = guild.members.cache.get(userId);
+            if (member && member.voice.channel) {
+                scheduler.scheduleReminder(client, guild.id, userId, reminder);
+                scheduled = true;
+                break; // Only schedule on one active connection
+            }
+        }
+        
+        // If not in voice, we can't schedule the *voice* reminder yet.
+        // But if they join later, the startup loop won't catch it unless we restart.
+        // We need a global reminder watcher? 
+        // Or just accept that if they aren't in voice NOW, they might miss it?
+        // Actually, `scheduler.scheduleReminder` sets a timeout. When timeout fires, it checks connection.
+        // So we should schedule it for *all* mutual guilds? Or just one?
+        // If we schedule for all, we might get duplicate reminders if they are in multiple (rare).
+        
+        if (!scheduled) {
+            // Just pick the first mutual guild to register the timer
+            for (const guild of client.guilds.cache.values()) {
+                if (guild.members.cache.has(userId)) {
+                    scheduler.scheduleReminder(client, guild.id, userId, reminder);
+                    break;
+                }
+            }
+        }
+
+        return message.reply(`Okay, I've set a reminder for "${reminderData.message}" at ${new Date(reminderData.remindAt).toLocaleTimeString()}.`);
+    }
+
+    // 3. Default Chat
+    // Maybe just acknowledge?
+    // message.reply("I only understand reminders right now in DMs.");
 });
 
 client.login(process.env.DISCORD_TOKEN);

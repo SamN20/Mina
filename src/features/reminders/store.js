@@ -28,17 +28,28 @@ function saveReminders() {
 }
 
 // Add a new reminder
-function addReminder(userId, message, remindAt) {
+function addReminder(userId, message, remindAt, type = 'time') {
     const reminder = {
         id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
         userId,
         message,
-        remindAt,
+        remindAt, // Can be null if type is 'on_join'
+        type, // 'time' or 'on_join'
         createdAt: new Date().toISOString()
     };
     reminders.push(reminder);
     saveReminders();
     return reminder;
+}
+
+// Get reminders triggered by an event (and remove them!)
+function getAndRemoveTriggeredReminders(userId, type) {
+    const triggered = reminders.filter(r => r.userId === userId && r.type === type);
+    if (triggered.length > 0) {
+        reminders = reminders.filter(r => !(r.userId === userId && r.type === type));
+        saveReminders();
+    }
+    return triggered;
 }
 
 // Remove a reminder
@@ -80,5 +91,6 @@ module.exports = {
     removeReminder,
     getUserReminders,
     getActiveReminders,
-    cleanupOldReminders
+    cleanupOldReminders,
+    getAndRemoveTriggeredReminders
 };
