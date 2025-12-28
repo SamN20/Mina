@@ -7,8 +7,44 @@ Mina is a highly capable Discord voice bot that uses AI (LLMs) to listen, unders
 - 🧠 **AI Intelligence**: Powered by Gemini or OpenRouter (Mistral/Llama).
 - 💾 **Memory System**: Remembers user facts and conversations across sessions.
 - 🔊 **TTS**: High-quality Text-to-Speech (Edge TTS, Azure).
+- 🌤️ **Weather Reports**: Real-time weather updates for any city.
+- 📝 **Smart Reminders**: Set reminders via Voice or DM, including "On Join" reminders.
+- 📜 **Conversation Summaries**: Ask Mina to catch you up on what you missed.
+- 🎛️ **Soundboard**: Play sound effects via voice commands.
 - 🛰️ **Satellite Client**: Control your PC's media (Spotify, YouTube) via voice commands ("Mina, pause music").
 - ⚙️ **Configurable**: Customizable wake words, personality, and voices.
+
+## New Features & Commands
+
+### 🌤️ Weather
+Ask for weather updates anywhere in the world.
+- "Mina, what's the weather in London?"
+- "Mina, do I need an umbrella in Seattle?"
+
+### 📜 Conversation Summary
+Mina can summarize recent conversations so you can catch up quickly.
+- "Mina, catch me up." (Summarizes last 30 mins)
+- "Mina, summarize the last hour."
+- "Mina, what did we talk about?"
+
+### 🎛️ Soundboard
+Play sound effects stored in `data/sounds/`.
+- "Mina, play sound airhorn."
+- "Mina, play effect sad trombone."
+*(Add your own `.mp3` files to `data/sounds/`)*
+
+### 📝 Enhanced Reminders
+**Voice:**
+- "Remind me to take out the trash in 10 minutes."
+
+**Direct Messages (DM):**
+- DM Mina: "Remind me to check the logs in 1 hour."
+- **On Join:** DM Mina: "Remind me next time I join to say hi to Sam."
+  - Mina will remember this and speak it out the moment you join a voice channel she is in.
+
+### 👻 Ghost Mode
+If enabled, Mina can perform actions even when not permanently in a channel.
+- If you join a channel and have an "On Join" reminder, Mina will briefly join, play your theme song, deliver the reminder, and then leave.
 
 ## Installation
 
