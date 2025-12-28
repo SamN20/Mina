@@ -67,6 +67,60 @@ function logEvent(username, userId, eventType) {
     });
 }
 
+/**
+ * Get the full conversation for a specific date (merged from all users)
+ * @param {string} [dateStr] - YYYY-MM-DD, defaults to today
+ * @param {number} [limitMinutes] - Only return lines from the last N minutes
+ * @returns {string}
+ */
+function getDailyConversation(dateStr = null, limitMinutes = null) {
+    const targetDate = dateStr || getTodayString();
+    const dayDir = path.join(BASE_DIR, targetDate);
+
+    if (!fs.existsSync(dayDir)) return "";
+
+    const files = fs.readdirSync(dayDir).filter(f => f.endsWith('.txt'));
+    let allLines = [];
+
+    for (const file of files) {
+        // Filename format: username-userId.txt
+        const username = file.split('-').slice(0, -1).join('-'); // Handle hyphens in username
+        const content = fs.readFileSync(path.join(dayDir, file), 'utf8');
+        const lines = content.split('\n').filter(l => l.trim());
+
+        for (const line of lines) {
+            // line: [10:00:00 AM] Hello world
+            const match = line.match(/^\[(.*?)\] (.*)$/);
+            if (match) {
+                const timestamp = match[1];
+                const text = match[2];
+                
+                // Parse time
+                const sortTime = new Date(`${targetDate} ${timestamp}`).getTime();
+
+                allLines.push({
+                    timestampStr: timestamp,
+                    username: username,
+                    text: text,
+                    sortTime: sortTime
+                });
+            }
+        }
+    }
+
+    // Sort by time
+    allLines.sort((a, b) => a.sortTime - b.sortTime);
+
+    // Filter by time limit if requested
+    if (limitMinutes && limitMinutes > 0) {
+        const cutoff = Date.now() - (limitMinutes * 60 * 1000);
+        allLines = allLines.filter(l => l.sortTime >= cutoff);
+    }
+
+    // Format back to string
+    return allLines.map(l => `[${l.timestampStr}] ${l.username}: ${l.text}`).join('\n');
+}
+
 const SETTINGS_FILE = path.join(process.cwd(), 'data', 'settings.json');
 const LOGS_DIR = path.join(process.cwd(), 'data', 'logs');
 let settings = {
@@ -219,6 +273,7 @@ function setDebugMode(enabled) {
 module.exports = {
     saveTranscript,
     logEvent,
+    getDailyConversation,
     getTranscriptPath,
     isOptedOut,
     setOptOut,
