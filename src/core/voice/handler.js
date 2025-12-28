@@ -50,6 +50,12 @@ module.exports = {
 async function executePlan(plan, guildId, userId, client) {
     if (!plan) return;
 
+    // Play success sound (queued)
+    const successSound = path.join(process.cwd(), 'data', 'sounds', 'success.mp3');
+    if (fs.existsSync(successSound)) {
+        audio.playFile(guildId, successSound, 0, 0.5, true);
+    }
+
     if (plan[ActionType.SATELLITE_CMD] && userId) {
         const cmd = plan[ActionType.SATELLITE_CMD];
         satelliteServer.sendCommand(userId, cmd.command);
@@ -244,6 +250,10 @@ function startListening(connection, guild) {
                 }
             } catch (e) {
                 console.error("Pipeline Error:", e);
+                const errorSound = path.join(process.cwd(), 'data', 'sounds', 'error.mp3');
+                if (fs.existsSync(errorSound)) {
+                    audio.playFile(guild.id, errorSound, 0, 0.5, true);
+                }
             }
 
             // 2. Legacy Chatterbox Fallback

@@ -227,20 +227,26 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
             return;
         }
 
-        // Play Join Sound (Theme Song)
+        // Play Join Sound (Theme Song or Generic)
         const joinSound = storage.getJoinSound(userId);
+        const genericJoin = path.join(process.cwd(), 'data', 'sounds', 'join.mp3');
+
         if (joinSound) {
             console.log(`[Theme] Playing join sound for ${username}`);
             // Small delay to ensure connection is stable and user can hear it
             setTimeout(() => {
-                voiceHandler.playFile(guildId, joinSound, 5000, 0.5); // Max 5000ms, 0.5 Volume
+                voiceHandler.playFile(guildId, joinSound, 5000, 0.5, true); // Max 5000ms, 0.5 Volume, Queued
             }, 2000);
+        } else if (fs.existsSync(genericJoin)) {
+             setTimeout(() => {
+                voiceHandler.playFile(guildId, genericJoin, 0, 0.5, true); // Queued
+            }, 1000);
         }
 
         // Small delay to let join sound play before greeting user
         setTimeout(() => {
             voiceHandler.greetNewUser(newState.guild.id, userId, newState.member);
-        }, 5000);
+        }, 4000);
     }
     // User Left Bot's Channel
     else if (oldState.channelId && oldState.channelId === botChannelId) {
@@ -252,11 +258,14 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
 
         // Play Leave Sound
         const leaveSound = storage.getLeaveSound(userId);
+        const genericLeave = path.join(process.cwd(), 'data', 'sounds', 'leave.mp3');
+
         if (leaveSound) {
             console.log(`[Theme] Playing leave sound for ${username}`);
             // Play sound (max 5s, 50% volume)
-            // Wait small delay to ensure Discord registers the leave visually? Not strictly necessary but safe.
-            voiceHandler.playFile(guildId, leaveSound, 5000, 0.5);
+            voiceHandler.playFile(guildId, leaveSound, 5000, 0.5, true);
+        } else if (fs.existsSync(genericLeave)) {
+            voiceHandler.playFile(guildId, genericLeave, 0, 0.5, true);
         }
 
         // Reset Status if BOT left

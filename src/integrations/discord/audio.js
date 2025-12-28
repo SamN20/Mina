@@ -179,7 +179,7 @@ async function speak(guildId, text, args = {}) {
 
         // Return promise that resolves when THIS item finishes playing
         return new Promise((resolve) => {
-            queue.push({ tempFile, resolve });
+            queue.push({ tempFile, resolve, isTemp: true });
             ttsQueues.set(guildId, queue);
             processQueue(guildId);
         });
@@ -204,22 +204,32 @@ function processQueue(guildId) {
 
     try {
         const resource = createAudioResource(item.tempFile, { inputType: StreamType.Arbitrary, inlineVolume: true });
+        if (item.volume) resource.volume.setVolume(item.volume);
+        
         const player = createAudioPlayer();
         activePlayers.set(guildId, player);
 
         player.play(resource);
         connection.subscribe(player);
 
+        let timeout = null;
+        if (item.duration && item.duration > 0) {
+            timeout = setTimeout(() => { player.stop(); }, item.duration);
+        }
+
         player.on(AudioPlayerStatus.Idle, () => {
             player.stop();
+            if (timeout) clearTimeout(timeout);
             activePlayers.delete(guildId);
             isSpeaking.set(guildId, false);
 
             // Delete file immediately?
-            try {
-                if (fs.existsSync(item.tempFile)) fs.unlinkSync(item.tempFile);
-                tempFiles = tempFiles.filter(f => f !== item.tempFile);
-            } catch (e) { }
+            if (item.isTemp) {
+                try {
+                    if (fs.existsSync(item.tempFile)) fs.unlinkSync(item.tempFile);
+                    tempFiles = tempFiles.filter(f => f !== item.tempFile);
+                } catch (e) { }
+            }
 
             // Resolve the promise for this item
             if (item.resolve) item.resolve(true);
@@ -249,10 +259,20 @@ function processQueue(guildId) {
  * @param {string} filePath 
  * @param {number} duration 
  * @param {number} volume 
+ * @param {boolean} useQueue
  */
-async function playFile(guildId, filePath, duration = 0, volume = 1.0) {
+async function playFile(guildId, filePath, duration = 0, volume = 1.0, useQueue = false) {
     if (!connections.has(guildId)) return false;
     if (!fs.existsSync(filePath)) return false;
+
+    if (useQueue) {
+        const queue = ttsQueues.get(guildId) || [];
+        return new Promise((resolve) => {
+            queue.push({ tempFile: filePath, resolve, isTemp: false, volume, duration });
+            ttsQueues.set(guildId, queue);
+            processQueue(guildId);
+        });
+    }
 
     const connection = connections.get(guildId);
     try {
