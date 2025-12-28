@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const storage = require('../src/core/storage');
 const path = require('path');
 const fs = require('fs');
@@ -24,22 +24,22 @@ module.exports = {
         if (targetUser.id !== interaction.user.id) {
             const adminIds = (process.env.ADMIN_IDS || '').split(',');
             if (!adminIds.includes(interaction.user.id)) {
-                return interaction.reply({ content: '❌ You need Admin permissions to set sounds for others.', ephemeral: true });
+                return interaction.reply({ content: '❌ You need Admin permissions to set sounds for others.', flags: MessageFlags.Ephemeral });
             }
         }
 
         // Validate File Type
         const validExtensions = ['audio/mpeg', 'audio/wav', 'audio/ogg', 'video/ogg'];
         if (!validExtensions.includes(attachment.contentType)) {
-            return interaction.reply({ content: '❌ Invalid file type. Please upload MP3, WAV, or OGG.', ephemeral: true });
+            return interaction.reply({ content: '❌ Invalid file type. Please upload MP3, WAV, or OGG.', flags: MessageFlags.Ephemeral });
         }
 
         // Validate Size (e.g. max 2MB)
         if (attachment.size > 2 * 1024 * 1024) {
-            return interaction.reply({ content: '❌ File too large. Max 2MB.', ephemeral: true });
+            return interaction.reply({ content: '❌ File too large. Max 2MB.', flags: MessageFlags.Ephemeral });
         }
 
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         // Ensure directory exists
         const soundsDir = path.resolve(__dirname, '../data/sounds');

@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const storage = require('../src/core/storage');
 
 // Simple cache for models
@@ -96,7 +96,7 @@ module.exports = {
         if (!adminIds.includes(interaction.user.id)) {
             return interaction.reply({
                 content: '❌ You do not have permission to use this command.',
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -105,7 +105,6 @@ module.exports = {
 
         await interaction.reply({
             content: `🧠 **AI Model Updated**\nNow using: \`${selectedModel}\``,
-            ephemeral: false
         });
     },
 };

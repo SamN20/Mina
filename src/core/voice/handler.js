@@ -13,6 +13,7 @@ const satelliteServer = require('../../integrations/satellite');
 const audio = require('../../integrations/discord/audio');
 const greetings = require('../../features/greetings');
 const scheduler = require('../../features/reminders/scheduler');
+const autoConversation = require('../../features/auto_conversation');
 
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const fs = require('fs');
@@ -256,7 +257,17 @@ function startListening(connection, guild) {
                 }
             }
 
-            // 2. Legacy Chatterbox Fallback
+            // 2. Auto Conversation (Chime In)
+            // Only if no command was executed and text is long enough to be meaningful
+            if (text.length > 10) {
+                autoConversation.processUtterance(text, {
+                    ...context,
+                    type: 'voice',
+                    channelId: connection.joinConfig.channelId // Use voice channel ID
+                });
+            }
+
+            // 3. Legacy Chatterbox Fallback
             if (storage.getChatterEnabled() && text.length > 2) {
                 const now = Date.now();
                 const lastChat = chatterCooldowns.get(guild.id) || 0;

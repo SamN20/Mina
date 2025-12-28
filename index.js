@@ -10,6 +10,7 @@ const storage = require('./src/core/storage');
 const reminders = require('./src/features/reminders/store');
 const scheduler = require('./src/features/reminders/scheduler');
 const intentClassifier = require('./src/core/nlu/classifier');
+const autoConversation = require('./src/features/auto_conversation');
 require('./src/features'); // Load all features (Commands)
 
 // Satellite Server Setup
@@ -41,7 +42,9 @@ const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildVoiceStates,
-        GatewayIntentBits.DirectMessages
+        GatewayIntentBits.DirectMessages,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent
     ],
     partials: [Partials.Channel] // Required for DMs
 });
@@ -352,9 +355,30 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
     }
 });
 
-// Event: Message Create (DM Handling)
+// Event: Message Create (DM Handling & Auto-Conversation)
 client.on(Events.MessageCreate, async message => {
     if (message.author.bot) return;
+
+    // Debug log to verify we are receiving messages
+    if (storage.getDebugMode()) {
+        console.log(`[Message] Received in ${message.channel.type === ChannelType.DM ? 'DM' : 'Guild'}: "${message.content}"`);
+    }
+
+    // 1. Auto-Conversation (Text Channels)
+    if (message.channel.type === ChannelType.GuildText) {
+        // Only if message is long enough to be meaningful (lowered to 2 for testing)
+        if (message.content.length > 1) {
+            autoConversation.processUtterance(message.content, {
+                guildId: message.guild.id,
+                channelId: message.channel.id,
+                username: message.member?.displayName || message.author.username,
+                type: 'text',
+                channel: message.channel
+            });
+        }
+        return;
+    }
+
     if (message.channel.type !== ChannelType.DM) return;
 
     console.log(`[DM] Received from ${message.author.tag}: ${message.content}`);

@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const storage = require('../src/core/storage');
 
 module.exports = {
@@ -19,10 +19,10 @@ module.exports = {
 
         if (action === 'out') {
             storage.setOptOut(userId, true);
-            await interaction.reply({ content: '🛑 You have opted out. The bot will ignore your voice from now on.', ephemeral: true });
+            await interaction.reply({ content: '🛑 You have opted out. The bot will ignore your voice from now on.', flags: MessageFlags.Ephemeral });
         } else {
             storage.setOptOut(userId, false);
-            await interaction.reply({ content: '✅ You have opted in. The bot will now transcribe your voice.', ephemeral: true });
+            await interaction.reply({ content: '✅ You have opted in. The bot will now transcribe your voice.', flags: MessageFlags.Ephemeral });
         }
     },
 };

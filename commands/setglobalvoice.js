@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, StringSelectMenuBuilder, ActionRowBuilder } = require('discord.js');
+const { SlashCommandBuilder, StringSelectMenuBuilder, ActionRowBuilder, MessageFlags } = require('discord.js');
 const storage = require('../src/core/storage');
 const edge = require('../src/integrations/tts/engines/edge');
 const azure = require('../src/integrations/tts/engines/azure');
@@ -13,7 +13,7 @@ module.exports = {
         if (!adminIds.includes(interaction.user.id)) {
             return interaction.reply({
                 content: '❌ You do not have permission to use this command.',
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -61,7 +61,7 @@ module.exports = {
         await interaction.reply({
             content: `**Admin Setting**: Choose the default voice used when users haven't picked one.`,
             components: [row],
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     },
 };

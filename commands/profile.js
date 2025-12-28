@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, MessageFlags } = require('discord.js');
 const memory = require('../src/core/memory');
 
 module.exports = {
@@ -31,12 +31,12 @@ module.exports = {
         if (sub === 'set_name') {
             const name = interaction.options.getString('name');
             memory.setProfile(userId, { name });
-            await interaction.reply({ content: `✅ I'll call you **${name}** from now on.`, ephemeral: true });
+            await interaction.reply({ content: `✅ I'll call you **${name}** from now on.`, flags: MessageFlags.Ephemeral });
         }
         else if (sub === 'set_bio') {
             const bio = interaction.options.getString('bio');
             memory.setProfile(userId, { bio });
-            await interaction.reply({ content: `✅ Updated your bio context.`, ephemeral: true });
+            await interaction.reply({ content: `✅ Updated your bio context.`, flags: MessageFlags.Ephemeral });
         }
         else if (sub === 'view') {
             const data = memory.getProfileData(userId);

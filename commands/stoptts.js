@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const voiceHandler = require('../src/core/voice/handler');
 
 module.exports = {
@@ -19,7 +19,7 @@ module.exports = {
         if (!adminIds.includes(interaction.user.id)) {
             return interaction.reply({
                 content: '❌ You do not have permission to use this command.',
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -32,14 +32,14 @@ module.exports = {
         if (result || clearQueue) {
             await interaction.reply({
                 content: clearQueue ? '🛑 **TTS Queue Cleared & Stopped.**' : '⏭️ **Skipped current TTS message.**',
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         } else {
             // Even if no player active, clearing queue is a valid action if logic supports it (it does above)
             // But if result false usually means no player active.
             await interaction.reply({
                 content: clearQueue ? '🛑 **TTS Queue Cleared.**' : '⚠️ No TTS message is currently playing.',
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
     },

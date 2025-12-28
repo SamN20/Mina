@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, ActionRowBuilder, StringSelectMenuBuilder } = require('discord.js');
+const { SlashCommandBuilder, ActionRowBuilder, StringSelectMenuBuilder, MessageFlags } = require('discord.js');
 const storage = require('../src/core/storage');
 const edge = require('../src/integrations/tts/engines/edge');
 const azure = require('../src/integrations/tts/engines/azure');
@@ -52,7 +52,7 @@ module.exports = {
         await interaction.reply({
             content: 'Please choose your preferred TTS voice:',
             components: [row],
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     },
 };

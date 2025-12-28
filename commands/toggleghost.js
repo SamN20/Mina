@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const storage = require('../src/core/storage');
 
 module.exports = {
@@ -11,7 +11,7 @@ module.exports = {
         if (!adminIds.includes(interaction.user.id)) {
             return interaction.reply({
                 content: '❌ You do not have permission to use this command.',
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
         }
 
@@ -21,7 +21,7 @@ module.exports = {
 
         await interaction.reply({
             content: `👻 **Ghost Mode** is now **${newState ? 'ON' : 'OFF'}**.\nThe bot will ${newState ? '' : 'no longer'} start briefly to play join/leave sounds.`,
-            ephemeral: true
+            flags: MessageFlags.Ephemeral
         });
     },
 };

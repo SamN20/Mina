@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
 const reminders = require('../src/features/reminders/store');
 
 module.exports = {
@@ -23,7 +23,7 @@ module.exports = {
             const userReminders = reminders.getUserReminders(userId);
 
             if (userReminders.length === 0) {
-                await interaction.reply({ content: 'You have no active reminders.', ephemeral: true });
+                await interaction.reply({ content: 'You have no active reminders.', flags: MessageFlags.Ephemeral });
                 return;
             }
 
@@ -42,16 +42,16 @@ module.exports = {
                 });
             }
 
-            await interaction.reply({ embeds: [embed], ephemeral: true });
+            await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
 
         } else if (sub === 'cancel') {
             const reminderId = interaction.options.getString('id');
 
             const removed = reminders.removeReminder(reminderId);
             if (removed) {
-                await interaction.reply({ content: 'Reminder cancelled successfully.', ephemeral: true });
+                await interaction.reply({ content: 'Reminder cancelled successfully.', flags: MessageFlags.Ephemeral });
             } else {
-                await interaction.reply({ content: 'Reminder not found or already triggered.', ephemeral: true });
+                await interaction.reply({ content: 'Reminder not found or already triggered.', flags: MessageFlags.Ephemeral });
             }
         }
     }
