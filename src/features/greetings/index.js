@@ -37,7 +37,11 @@ async function greetNewUser(guildId, userId, member) {
     try {
         const profile = memory.getProfileData(userId);
         const name = profile.displayName || member.displayName;
-        const facts = profile.facts.slice(0, 3).join(', ');
+        const facts = (profile.memories || [])
+            .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+            .slice(0, 3)
+            .map(m => m.text)
+            .join(', ');
 
         const prompt = `
 A user named "${name}" just joined the voice call where you are present.
@@ -85,7 +89,10 @@ async function greetGroupOnJoin(channel, isSilent = false) {
                 const profile = memory.getProfileData(id);
                 presentUsers.push({
                     name: profile.displayName || member.displayName,
-                    facts: profile.facts.slice(0, 5)
+                    facts: (profile.memories || [])
+                        .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+                        .slice(0, 5)
+                        .map(m => m.text)
                 });
             }
         }

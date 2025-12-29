@@ -41,7 +41,10 @@ module.exports = {
         else if (sub === 'view') {
             const data = memory.getProfileData(userId);
             const discordName = interaction.member.displayName;
-            const facts = data.facts;
+            // Use new memory structure, fallback to empty array, sort by newest first
+            const facts = (data.memories || [])
+                .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+                .map(m => m.text);
 
             // Pagination Logic
             const ITEMS_PER_PAGE = 10;
