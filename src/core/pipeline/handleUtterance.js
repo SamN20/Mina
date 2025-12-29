@@ -69,9 +69,13 @@ async function handleUtterance(text, context) {
 
 
     // AI Logic (Simulation of voiceHandler AI block)
-    const memoryContext = memory.getContext(context.userId, context.username, query);
-    // We need status? context.currentStatus can be passed in
-    const fullPrompt = `${memoryContext}\n[Your Current Status: "${context.currentStatus || 'Online'}"]\nUser: ${query}`;
+    const memoryContext = await memory.getContext(context.userId, context.username, query);
+    
+    const now = new Date();
+    const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const dateString = now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+
+    const fullPrompt = `${memoryContext}\n[Current Time: ${dateString} at ${timeString}]\n[Your Current Status: "${context.currentStatus || 'Online'}"]\nUser: ${query}`;
 
     const response = await ai.generateResponse(fullPrompt);
     console.log(`[AI] Response: "${response}"`);

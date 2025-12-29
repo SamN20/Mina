@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
-const ai = require('../../integrations/ai'); // Use generic AI provider for learning
+const ai = require('../../integrations/ai');
+const vector = require('./vector');
 
 const MEMORY_FILE = path.join(process.cwd(), 'data', 'memory.json');
 const MEMORY_LOG_FILE = path.join(process.cwd(), 'data', 'memory.log');
@@ -16,6 +17,7 @@ let memory = {};
 if (fs.existsSync(MEMORY_FILE)) {
     try {
         memory = JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf8'));
+        migrateLegacyMemory(); // Trigger background migration
     } catch (e) {
         console.error("Failed to load memory:", e);
     }
@@ -40,248 +42,434 @@ function logToMemoryFile(header, details) {
     }
 }
 
+// --- Migration & Structure ---
+
+async function migrateLegacyMemory() {
+    let changed = false;
+    console.log("[Memory] Checking for legacy memories...");
+    
+    for (const userId in memory) {
+        const profile = memory[userId];
+        
+        // Initialize new structure if missing
+        if (!profile.memories) {
+            profile.memories = [];
+            changed = true;
+        }
+
+        // Migrate old 'facts' array
+        if (profile.facts && Array.isArray(profile.facts) && profile.facts.length > 0) {
+            console.log(`[Memory] Migrating ${profile.facts.length} facts for ${userId}...`);
+            for (const fact of profile.facts) {
+                // Check if already exists in memories to avoid dupes
+                if (!profile.memories.find(m => m.text === fact)) {
+                    // Generate embedding for legacy fact
+                    try {
+                        const embedding = await vector.getEmbedding(fact);
+                        profile.memories.push({
+                            text: fact,
+                            category: 'legacy', // Default category for old stuff
+                            embedding: embedding,
+                            timestamp: Date.now()
+                        });
+                    } catch (e) {
+                        console.error(`[Memory] Failed to embed legacy fact: "${fact}"`, e);
+                        // Push without embedding, will be ignored by vector search but maybe kept?
+                        // Or just retry later. For now, skip.
+                    }
+                }
+            }
+            profile.facts = []; // Clear old array
+            changed = true;
+        }
+    }
+
+    if (changed) {
+        saveMemory();
+        console.log("[Memory] Migration complete.");
+    }
+}
+
 // Get raw profile object
 function getProfileData(userId) {
     if (!memory[userId]) {
         memory[userId] = {
             displayName: null,
             bio: null,
-            facts: []
+            memories: [] // { text, category, embedding, timestamp }
         };
     }
+    // Ensure memories array exists
+    if (!memory[userId].memories) memory[userId].memories = [];
     return memory[userId];
 }
 
+function getRelativeTime(timestamp) {
+    if (!timestamp) return "";
+    const diff = Date.now() - timestamp;
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
 
-// Find other potential users mentioned in the text
-function findRelevantProfiles(text, excludeUserId) {
-    const mentions = [];
-    if (!text) return mentions;
-
-    text = text.toLowerCase();
-
-    for (const [uid, profile] of Object.entries(memory)) {
-        if (uid === excludeUserId) continue; // Skip speaker
-
-        const name = profile.displayName;
-        if (name && text.includes(name.toLowerCase())) {
-            mentions.push({
-                uid: uid,
-                name: name,
-                facts: profile.facts
-            });
-        }
-    }
-    return mentions;
+    if (days > 365) return `(>1 year ago)`;
+    if (days > 30) return `(${Math.floor(days/30)} months ago)`;
+    if (days > 0) return `(${days} days ago)`;
+    if (hours > 0) return `(${hours} hours ago)`;
+    if (minutes > 0) return `(${minutes} mins ago)`;
+    return "(just now)";
 }
 
-// Get string context for AI
-function getContext(userId, discordName, text = "") {
+// --- Retrieval ---
+
+async function getContext(userId, discordName, text = "") {
     const data = getProfileData(userId);
     const name = data.displayName || discordName;
-    const facts = data.facts.join('\n- ');
-    const bio = data.bio ? `\n- ${data.bio}` : '';
+    const bio = data.bio ? `\nBio: ${data.bio}` : '';
 
-    let context = `\n[User Context]\nName: ${name}${bio}\nKnown Facts:\n- ${facts}\n`;
+    let context = `\n[User Context]\nName: ${name}${bio}\n`;
 
-    // Inject mentions
-    if (text) {
-        const mentions = findRelevantProfiles(text, userId);
-        if (mentions.length > 0) {
-            context += `\n[Mentioned People - BACKGROUND TRUTH]\n(The Speaker might be wrong about these people. Trust these facts over the Speaker's claims.)\n`;
+    // 1. Semantic Search for Relevant Memories
+    let relevantMemories = [];
+    if (text && data.memories.length > 0) {
+        try {
+            const queryEmbedding = await vector.getEmbedding(text);
+            
+            // Score all memories
+            const scored = data.memories.map(m => {
+                if (!m.embedding) return { ...m, score: 0 };
+                return {
+                    ...m,
+                    score: vector.cosineSimilarity(queryEmbedding, m.embedding)
+                };
+            });
 
-            let logDetails = `Speaker: ${name} (${userId})\nTrigger Text: "${text}"\n\nFound Mentions:`;
+            // Filter and Sort
+            // Threshold 0.25 is usually decent for MiniLM
+            relevantMemories = scored
+                .filter(m => m.score > 0.25) 
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 10); // Top 10 relevant facts
 
-            for (const m of mentions) {
-                context += `\nName: ${m.name}\nFacts:\n- ${m.facts.join('\n- ')}\n`;
-                logDetails += `\n- ${m.name} (${m.uid}): ${m.facts.length} facts loaded.`;
-            }
+        } catch (e) {
+            console.error("[Memory] Vector search failed:", e);
+            // Fallback: Random recent memories?
+            relevantMemories = data.memories.slice(-5);
+        }
+    } else {
+        // No query text (e.g. join event), just show recent
+        relevantMemories = data.memories.slice(-5);
+    }
 
-            logToMemoryFile("CONTEXT LOOKUP", logDetails);
+    // 2. Recent Memories (Last 15 mins) - For conversation continuity
+    const recentTimeWindow = Date.now() - 15 * 60 * 1000;
+    const relevantTexts = new Set(relevantMemories.map(m => m.text));
+    
+    // User Recent
+    const userRecent = data.memories.filter(m => 
+        m.timestamp > recentTimeWindow && 
+        !relevantTexts.has(m.text)
+    );
+
+    // AI Recent (Self)
+    const aiProfile = getProfileData("MINA_SELF");
+    const aiRecent = aiProfile.memories.filter(m => 
+        m.timestamp > recentTimeWindow
+    );
+
+    // Combine and sort by timestamp (oldest to newest for flow)
+    const recentMemories = [...userRecent, ...aiRecent].sort((a, b) => a.timestamp - b.timestamp);
+
+
+    // Group by Category
+    const categories = {
+        personal: [],
+        preferences: [],
+        relationships: [],
+        trivia: [],
+        legacy: []
+    };
+
+    for (const m of relevantMemories) {
+        const cat = m.category || 'trivia';
+        const timeStr = getRelativeTime(m.timestamp);
+        const entry = `${m.text} ${timeStr}`;
+
+        if (categories[cat]) categories[cat].push(entry);
+        else categories.trivia.push(entry);
+    }
+
+    // Build Context String
+    let logDetails = `User: ${name} (${userId})\nQuery: "${text}"`;
+
+    if (relevantMemories.length > 0) {
+        context += `\nRelevant Memories (Retrieved via Semantic Search):\n`;
+        logDetails += `\n\nRetrieved Memories:`;
+
+        if (categories.personal.length) {
+            context += `[Personal]\n- ${categories.personal.join('\n- ')}\n`;
+            logDetails += `\n[Personal] ${categories.personal.join(', ')}`;
+        }
+        if (categories.preferences.length) {
+            context += `[Preferences]\n- ${categories.preferences.join('\n- ')}\n`;
+            logDetails += `\n[Preferences] ${categories.preferences.join(', ')}`;
+        }
+        if (categories.relationships.length) {
+            context += `[Relationships]\n- ${categories.relationships.join('\n- ')}\n`;
+            logDetails += `\n[Relationships] ${categories.relationships.join(', ')}`;
+        }
+        if (categories.trivia.length) {
+            context += `[Trivia/Other]\n- ${categories.trivia.join('\n- ')}\n`;
+            logDetails += `\n[Trivia] ${categories.trivia.join(', ')}`;
+        }
+        if (categories.legacy.length) {
+            context += `[Old Memories]\n- ${categories.legacy.join('\n- ')}\n`;
+            logDetails += `\n[Legacy] ${categories.legacy.join(', ')}`;
+        }
+    } else {
+        context += `\n(No relevant memories found for this topic)\n`;
+        logDetails += `\nResult: No relevant memories found via search.`;
+    }
+
+    // Add Recent Context
+    if (recentMemories.length > 0) {
+        context += `\n[Recent Conversation Context (Last 15 mins)]\n`;
+        logDetails += `\n\n[Recent Context (Last 15 mins)]`;
+        for (const m of recentMemories) {
+             context += `- ${m.text} ${getRelativeTime(m.timestamp)}\n`;
+             logDetails += `\n- ${m.text}`;
         }
     }
 
-    // Inject AI Self Memory
+    // Log if there was a query
+    if (text) {
+        logToMemoryFile("MEMORY RETRIEVAL", logDetails);
+    }
+
+    // Inject AI Self Memory (Also Semantic?)
+    // For now, keep AI memory simple or do the same search
     const aiData = getProfileData("MINA_SELF");
-    if (aiData.facts.length > 0) {
-        context += `\n[My (AI) Memory & Traits]\n(Things I know about myself)\n- ${aiData.facts.join('\n- ')}\n`;
+    if (aiData.memories.length > 0 && text) {
+        try {
+            const queryEmbedding = await vector.getEmbedding(text);
+            const aiScored = aiData.memories.map(m => ({
+                ...m,
+                score: m.embedding ? vector.cosineSimilarity(queryEmbedding, m.embedding) : 0
+            }));
+            const aiRelevant = aiScored.filter(m => m.score > 0.25).sort((a, b) => b.score - a.score).slice(0, 3);
+            
+            if (aiRelevant.length > 0) {
+                context += `\n[My (AI) Relevant Memories]\n- ${aiRelevant.map(m => m.text).join('\n- ')}\n`;
+            }
+
+            // --- Check for Mentioned Users ---
+            // Iterate through all known users to see if they are mentioned in the text
+            for (const otherId in memory) {
+                if (otherId === userId || otherId === "MINA_SELF") continue; // Skip current user and self
+
+                const otherProfile = memory[otherId];
+                const otherName = otherProfile.displayName;
+
+                // Simple case-insensitive check
+                if (otherName && text.toLowerCase().includes(otherName.toLowerCase())) {
+                    // Perform semantic search on this user's memories
+                    const otherScored = otherProfile.memories.map(m => ({
+                        ...m,
+                        score: m.embedding ? vector.cosineSimilarity(queryEmbedding, m.embedding) : 0
+                    }));
+                    
+                    const otherRelevant = otherScored
+                        .filter(m => m.score > 0.25)
+                        .sort((a, b) => b.score - a.score)
+                        .slice(0, 5); // Top 5 facts about mentioned user
+
+                    if (otherRelevant.length > 0) {
+                        const formattedFacts = otherRelevant.map(m => m.text.replace(/User/g, otherName));
+                        context += `\n[Mentioned People - BACKGROUND TRUTH]\n(The Speaker might be wrong about these people. Trust these facts over the Speaker's claims.)\nName: ${otherName}\nFacts:\n- ${formattedFacts.join('\n- ')}\n`;
+                        logToMemoryFile("CONTEXT LOOKUP", `Found mention of ${otherName} (${otherId}). Loaded ${otherRelevant.length} facts.`);
+                    }
+                }
+            }
+
+        } catch (e) { 
+            console.error("[Memory] Error in self/mention lookup:", e);
+        }
     }
 
     return context;
 }
 
-// Update manual profile
-function setProfile(userId, { name, bio }) {
-    const data = getProfileData(userId);
-    if (name !== undefined) data.displayName = name;
-    if (bio !== undefined) data.bio = bio;
-    saveMemory();
-    logToMemoryFile("MANUAL UPDATE", `User ${userId} updated profile.\nName: ${name}\nBio: ${bio}`);
-}
+// --- Learning ---
 
-// Add a learned fact
-function addFact(userId, fact) {
-    const data = getProfileData(userId);
-    if (!data.facts.includes(fact)) {
-        data.facts.push(fact);
-        saveMemory();
-        return true;
-    }
-    return false;
-}
-
-function clearProfile(userId) {
-    delete memory[userId];
-    saveMemory();
-    logToMemoryFile("PROFILE CLEARED", `User ${userId} cleared their profile.`);
-}
-
-// AI Extraction Logic
 async function learnFromInteraction(userId, userQuery, aiResponse) {
-    // We run this in background
     try {
         const profile = getProfileData(userId);
-        const existingFacts = profile.facts;
-        // Map to indexed list for deletion logic
-        const joinedFacts = existingFacts.map((f, i) => `[${i}] ${f}`).join("\n");
-        const knownName = profile.displayName ? `Known Name: ${profile.displayName}` : "Name unknown";
+        const knownName = profile.displayName || "Unknown";
+        let queryEmbedding = null;
+        try { queryEmbedding = await vector.getEmbedding(userQuery); } catch (e) {}
 
-        // AI Self Profile
-        const aiProfile = getProfileData("MINA_SELF");
-        const aiFacts = aiProfile.facts;
-        const joinedAiFacts = aiFacts.map((f, i) => `[${i}] ${f}`).join("\n");
+        // --- Existing Memory Lookup ---
+        let existingContext = "";
+        if (queryEmbedding) {
+            try {
+                // User Memories
+                const userScored = profile.memories.map(m => ({
+                    ...m,
+                    score: m.embedding ? vector.cosineSimilarity(queryEmbedding, m.embedding) : 0
+                }));
+                const userRelevant = userScored.filter(m => m.score > 0.25).sort((a, b) => b.score - a.score).slice(0, 5);
+                
+                if (userRelevant.length > 0) {
+                    existingContext += `\n[Existing Knowledge about User]\n- ${userRelevant.map(m => m.text).join('\n- ')}\n`;
+                }
 
-        // Find mentions for Truth Context
-        const mentions = findRelevantProfiles(userQuery, userId);
-        let truthContext = "";
-        if (mentions.length > 0) {
-            truthContext = "\n[Mentioned People (TRUTH)]\n";
-            for (const m of mentions) {
-                truthContext += `${m.name}: ${m.facts.join(", ")}\n`;
-            }
+                // AI Memories
+                const aiProfile = getProfileData("MINA_SELF");
+                const aiScored = aiProfile.memories.map(m => ({
+                    ...m,
+                    score: m.embedding ? vector.cosineSimilarity(queryEmbedding, m.embedding) : 0
+                }));
+                const aiRelevant = aiScored.filter(m => m.score > 0.25).sort((a, b) => b.score - a.score).slice(0, 3);
+
+                if (aiRelevant.length > 0) {
+                    existingContext += `\n[Existing Knowledge about AI]\n- ${aiRelevant.map(m => m.text).join('\n- ')}\n`;
+                }
+            } catch (e) { console.error("[Memory] Existing memory lookup failed:", e); }
         }
 
+        // --- Truth Context Lookup (Restored) ---
+        let truthContext = "";
+        try {
+            if (!queryEmbedding) queryEmbedding = await vector.getEmbedding(userQuery);
+            for (const otherId in memory) {
+                if (otherId === userId || otherId === "MINA_SELF") continue;
+                const otherProfile = memory[otherId];
+                const otherName = otherProfile.displayName;
+
+                if (otherName && userQuery.toLowerCase().includes(otherName.toLowerCase())) {
+                    const otherScored = otherProfile.memories.map(m => ({
+                        ...m,
+                        score: m.embedding ? vector.cosineSimilarity(queryEmbedding, m.embedding) : 0
+                    }));
+                    const otherRelevant = otherScored.filter(m => m.score > 0.25).sort((a, b) => b.score - a.score).slice(0, 5);
+                    
+                    if (otherRelevant.length > 0) {
+                        const formattedFacts = otherRelevant.map(m => m.text.replace(/User/g, otherName));
+                        truthContext += `\n[Mentioned People (TRUTH)]\nName: ${otherName}\nFacts:\n- ${formattedFacts.join('\n- ')}\n`;
+                    }
+                }
+            }
+        } catch (e) { console.error("[Memory] Truth lookup failed:", e); }
+
         const extractionPrompt = `
-Analyze the interaction between User (Speaker) and AI (Mina).
-Update the Speaker's memory profile AND the AI's internal self-memory.
+Analyze the interaction between User (${knownName}) and AI (Mina).
+Extract new facts to store in long-term memory.
+Categorize each fact into: 'personal', 'preferences', 'relationships', or 'trivia'.
+Identify if the fact is about the User or the AI.
 
-[Speaker Profile]
-${knownName}
-Facts:
-${joinedFacts}
-
-[AI (Mina) Self-Memory]
-Facts:
-${joinedAiFacts}
-
+${existingContext}
 ${truthContext}
-
-[Instructions]
-1. **TRUTH CHECK**: If Speaker makes a claim about a Mentioned Person, check [Mentioned People].
-   - If Speaker's claim contradicts Truth, record as: "Speaker *claims* [fact] (Contradicted by Truth)".
-
-[Extraction Examples]
-- User: "Do you like cats?" | AI: "I love cats!" 
-  -> Speaker Updates: [] (User asked a question, didn't state a fact about themselves).
-- User: "I have a cat named Bo." | AI: "Cute!" 
-  -> Speaker Updates: ["Has a cat named Bo"] (User stated a fact).
-- User: "What is your favorite game?" | AI: "Zelda." 
-  -> Speaker Updates: [] (User asked about AI, do NOT infer User likes Zelda).
-- User: "I hate Mondays." | AI: "Same."
-  -> Speaker Updates: ["Hates Mondays"].
-
-2. **SPEAKER UPDATES**:
-   - **ADD**: New permanent facts about the Speaker (Names, Hobbies, etc.).
-   - **IMPORTANT**: Only extract facts the Speaker EXPLICITLY confirmed or stated about themselves.
-   - **❌ DO NOT** attribute the AI's opinions/hobbies to the Speaker. (e.g., If AI says "I love Zelda", do NOT write "Speaker likes Zelda").
-   - **❌ DO NOT** infer interest just because the Speaker ASKED a question. (e.g., "Do you like Zelda?" != "Speaker likes Zelda").
-   - **REMOVE**: Only if Speaker EXPLICITLY negates old facts (Use indices from [Speaker Profile]).
-   - **CLEANUP**: Remove apologetic/irrelevant facts if user seems to have moved on.
-
-3. **AI SELF UPDATES**:
-   - **ADD**: New facts Mina has established about HERSELF (e.g., "I love Minecraft", "I hate CoD").
-   - **REMOVE**: If Mina changes her mind or corrects herself (Use indices from [AI Self-Memory]).
-   - **RULE**: Do NOT store facts about other users in AI Memory. Store them in the User's profile.
-
-4. **OUTPUT**: Strictly Valid JSON.
-{
-  "speaker": {
-    "add": ["New user fact"],
-    "remove": [0] // Indices to remove from Speaker
-  },
-  "self": {
-    "add": ["New AI fact"],
-    "remove": [1] // Indices to remove from AI
-  }
-}
 
 User: "${userQuery}"
 AI: "${aiResponse}"
+
+Instructions:
+1. **TRUTH CHECK**: If Speaker makes a claim about a Mentioned Person, check [Mentioned People (TRUTH)].
+   - If Speaker's claim contradicts Truth, record as: "Speaker *claims* [fact] (Contradicted by Truth)".
+2. Extract explicit facts stated by the user about *themselves* (e.g. "I like pizza").
+3. Extract explicit facts stated by the AI about *itself* (e.g. "I love JRPGs").
+4. **STRICTLY IGNORE** facts about third parties (anyone other than ${knownName} or Mina).
+   - **CRITICAL**: If the AI mentions a fact about a third party (e.g. "Sam likes Battlefield"), **DO NOT** attribute this to the User (${knownName}).
+   - Example: User asks "What does Sam like?", AI answers "Sam likes apples". Result: NO FACT EXTRACTED.
+   - **EXCEPTION**: Only extract if it defines a direct relationship to the User (e.g. "Sam is my friend", "I hate Sam").
+5. Do NOT extract questions or temporary states (e.g. "I am hungry").
+6. **REMOVAL**: If the User explicitly asks to forget something, or if a new fact contradicts an old memory (visible in Context), add the *exact text* of the old memory to the 'remove' list.
+7. Output strictly valid JSON.
+
+Output Format:
+{
+  "facts": [
+    { "text": "User owns a cat named Bo", "category": "personal", "subject": "user" },
+    { "text": "Mina loves JRPGs", "category": "preferences", "subject": "ai" },
+    { "text": "Speaker claims Joe is German (Contradicted by Truth)", "category": "relationships", "subject": "user" }
+  ],
+  "remove": [
+    { "text": "User owns a dog", "subject": "user" }
+  ]
+}
 `;
 
         let output = await ai.generateResponse(extractionPrompt);
-
-        // Clean up code blocks if present
-        output = output.replace(/```json/g, '').replace(/```/g, '').trim();
-
-        let updates;
-        try {
-            updates = JSON.parse(output);
-        } catch (e) {
-            return;
+        
+        // Robust JSON extraction
+        const jsonStart = output.indexOf('{');
+        const jsonEnd = output.lastIndexOf('}');
+        if (jsonStart !== -1 && jsonEnd !== -1) {
+            output = output.substring(jsonStart, jsonEnd + 1);
+        } else {
+            // Fallback cleanup if no braces found (unlikely but possible)
+            output = output.replace(/```json/g, '').replace(/```/g, '').trim();
         }
 
-        if (updates) {
+        let result;
+        try {
+            result = JSON.parse(output);
+        } catch (e) { 
+            console.error("[Memory] JSON Parse Error. Raw output:", output);
+            return; 
+        }
+
+        if (result) {
+            let logMsg = `User: ${userId}\nQuery: "${userQuery}"`;
             let changed = false;
-            let logMsg = `User: ${knownName} (${userId})\nQuery: "${userQuery}"`;
+            const removedTexts = new Set();
 
-            // Helper to process updates
-            const applyUpdates = (targetProfile, ops, typeName) => {
-                let localChanged = false;
-                if (!ops) return false;
-
-                // Removals (Desc Sort)
-                if (ops.remove && Array.isArray(ops.remove)) {
-                    const indices = ops.remove.sort((a, b) => b - a);
-                    for (const index of indices) {
-                        if (index >= 0 && index < targetProfile.facts.length) {
-                            const removed = targetProfile.facts.splice(index, 1);
-                            console.log(`[Memory] Removed (${typeName}): "${removed}"`);
-                            logMsg += `\nREMOVED (${typeName}): "${removed}"`;
-                            localChanged = true;
-                        }
+            // Handle Removals
+            if (result.remove && Array.isArray(result.remove)) {
+                for (const item of result.remove) {
+                    const targetId = (item.subject === 'ai') ? "MINA_SELF" : userId;
+                    const targetProfile = getProfileData(targetId);
+                    
+                    const initialLength = targetProfile.memories.length;
+                    // Filter out the memory (Exact match, trimmed)
+                    targetProfile.memories = targetProfile.memories.filter(m => m.text.trim() !== item.text.trim());
+                    
+                    if (targetProfile.memories.length < initialLength) {
+                        logMsg += `\nREMOVED [${targetId === "MINA_SELF" ? "AI" : "User"}]: "${item.text}"`;
+                        removedTexts.add(item.text);
+                        changed = true;
                     }
                 }
+            }
 
-                // Additions
-                if (ops.add && Array.isArray(ops.add)) {
-                    for (let fact of ops.add) {
-                        let cleanFact = fact.trim();
-                        // Clean "User says" prefixes if sticking to user profile logic
-                        if (cleanFact.length > 0) {
-                            cleanFact = cleanFact.charAt(0).toUpperCase() + cleanFact.slice(1);
-                        }
+            // Handle Additions
+            if (result.facts && Array.isArray(result.facts)) {
+                for (const item of result.facts) {
+                    // Skip if it was just removed
+                    if (removedTexts.has(item.text)) continue;
 
-                        if (cleanFact.length > 3 && cleanFact.length < 150) {
-                            if (!targetProfile.facts.includes(cleanFact)) {
-                                targetProfile.facts.push(cleanFact);
-                                console.log(`[Memory] Learned (${typeName}): "${cleanFact}"`);
-                                logMsg += `\nADDED (${typeName}): "${cleanFact}"`;
-                                localChanged = true;
-                            }
-                        }
+                    // Determine target profile
+                    const targetId = (item.subject === 'ai') ? "MINA_SELF" : userId;
+                    const targetProfile = getProfileData(targetId);
+                    
+                    // Check for duplicates (fuzzy check?)
+                    // For now, exact string check on text
+                    if (!targetProfile.memories.find(m => m.text === item.text)) {
+                        // Generate Embedding
+                        const embedding = await vector.getEmbedding(item.text);
+                        
+                        targetProfile.memories.push({
+                            text: item.text,
+                            category: item.category || 'trivia',
+                            embedding: embedding,
+                            timestamp: Date.now()
+                        });
+                        
+                        logMsg += `\nLEARNED [${targetId === "MINA_SELF" ? "AI" : "User"} - ${item.category}]: "${item.text}"`;
+                        changed = true;
                     }
                 }
-                return localChanged;
-            };
+            }
 
-            // Apply to Speaker
-            if (applyUpdates(profile, updates.speaker, "Speaker")) changed = true;
-
-            // Apply to Self
-            if (applyUpdates(aiProfile, updates.self, "AI")) changed = true;
-
-            // Save after batch update
             if (changed) {
                 saveMemory();
                 logToMemoryFile("MEMORY UPDATE", logMsg);
@@ -293,11 +481,26 @@ AI: "${aiResponse}"
     }
 }
 
+// --- Utils ---
+
+function setProfile(userId, { name, bio }) {
+    const data = getProfileData(userId);
+    if (name !== undefined) data.displayName = name;
+    if (bio !== undefined) data.bio = bio;
+    saveMemory();
+    logToMemoryFile("MANUAL UPDATE", `User ${userId} updated profile.\nName: ${name}\nBio: ${bio}`);
+}
+
+function clearProfile(userId) {
+    delete memory[userId];
+    saveMemory();
+    logToMemoryFile("PROFILE CLEARED", `User ${userId} cleared their profile.`);
+}
+
 module.exports = {
     getProfileData,
     getContext,
     setProfile,
-    addFact,
     clearProfile,
     learnFromInteraction
 };

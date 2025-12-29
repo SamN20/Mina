@@ -82,6 +82,7 @@ function normalizeWakeWord(text) {
     normalized = normalized.replace(/\bnina\b/gi, 'Mina');
     normalized = normalized.replace(/\bmena\b/gi, 'Mina');
     normalized = normalized.replace(/\bminae\b/gi, 'Mina');
+    normalized = normalized.replace(/\bminna\b/gi, 'Mina');
 
     // STEP 5: Normalize standalone command misspellings
     normalized = normalized.replace(/\bpaz\b/gi, 'pause');

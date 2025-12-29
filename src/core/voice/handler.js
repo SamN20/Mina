@@ -75,6 +75,13 @@ async function executePlan(plan, guildId, userId, client) {
     if (plan[ActionType.TIMER_SET]) {
         scheduler.scheduleReminder(client, guildId, userId, plan[ActionType.TIMER_SET]);
     }
+
+    // STATUS UPDATE FIX
+    if (plan.metadata && plan.metadata.newStatus) {
+        const { ActivityType } = require('discord.js');
+        console.log(`[Status] AI changing status to: "${plan.metadata.newStatus}"`);
+        client.user.setActivity(plan.metadata.newStatus, { type: ActivityType.Playing });
+    }
 }
 
 // --- Interaction Handlers ---
@@ -240,7 +247,8 @@ function startListening(connection, guild) {
                 // "chat" intent means generic AI, so trigger confidence matters.
                 // "music/reminder" intents are specific commands.
                 if (preCheck.intent && (preCheck.intent !== 'chat' || preCheck.triggerConfidence >= 0.6)) {
-                    audio.playFile(guild.id, path.join(process.cwd(), 'data', 'sounds', 'thinking.mp3'));
+                    // Fix: Interrupt current TTS with "Thinking" sound, then resume
+                    audio.playInterruption(guild.id, path.join(process.cwd(), 'data', 'sounds', 'thinking.mp3'));
                 }
 
                 const plan = await pipeline.handleUtterance(text, context);

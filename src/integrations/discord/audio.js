@@ -16,6 +16,8 @@ const connections = new Map(); // GuildId -> Connection
 const ttsQueues = new Map(); // GuildId -> Array of { tempFile }
 const isSpeaking = new Map(); // GuildId -> Boolean
 const activePlayers = new Map(); // GuildId -> AudioPlayer
+const currentItems = new Map(); // GuildId -> Item
+const isInterrupted = new Map(); // GuildId -> Boolean
 let tempFiles = [];
 
 // Exports
@@ -25,6 +27,7 @@ module.exports = {
     speak,
     playFile,
     stopTTS,
+    playInterruption,
     getConnection,
     getVoiceConnectionStatus: VoiceConnectionStatus
 };
@@ -199,6 +202,7 @@ function processQueue(guildId) {
 
     isSpeaking.set(guildId, true);
     const item = queue.shift();
+    currentItems.set(guildId, item);
 
     const connection = connections.get(guildId);
 
@@ -222,6 +226,16 @@ function processQueue(guildId) {
             if (timeout) clearTimeout(timeout);
             activePlayers.delete(guildId);
             isSpeaking.set(guildId, false);
+            currentItems.delete(guildId);
+
+            // Check for interruption
+            if (isInterrupted.get(guildId)) {
+                isInterrupted.set(guildId, false);
+                // Do NOT delete file, do NOT resolve
+                // Just process queue (which now has the interruption first, then this item)
+                processQueue(guildId);
+                return;
+            }
 
             // Delete file immediately?
             if (item.isTemp) {
@@ -249,6 +263,42 @@ function processQueue(guildId) {
         console.error("Error processing queue:", e);
         isSpeaking.set(guildId, false);
         if (item.resolve) item.resolve(false);
+        processQueue(guildId);
+    }
+}
+
+/**
+ * Plays an interruption sound (pauses current TTS, plays sound, resumes TTS)
+ * @param {string} guildId 
+ * @param {string} filePath 
+ */
+async function playInterruption(guildId, filePath) {
+    if (!connections.has(guildId)) return false;
+    if (!fs.existsSync(filePath)) return false;
+
+    const queue = ttsQueues.get(guildId) || [];
+    const current = currentItems.get(guildId);
+    const player = activePlayers.get(guildId);
+
+    // 1. If playing, pause (stop and re-queue)
+    if (player && current) {
+        console.log(`[Audio] Interrupting current TTS for ${guildId}`);
+        isInterrupted.set(guildId, true);
+        
+        // Put current item back at front
+        queue.unshift(current);
+        
+        // Stop player (triggers Idle -> checks isInterrupted -> processQueue)
+        player.stop();
+    }
+
+    // 2. Add interruption sound to front
+    // If we just unshifted current, this goes BEFORE it.
+    queue.unshift({ tempFile: filePath, resolve: null, isTemp: false, volume: 1.0 });
+    ttsQueues.set(guildId, queue);
+
+    // 3. If not playing, start queue
+    if (!player) {
         processQueue(guildId);
     }
 }
@@ -301,3 +351,13 @@ async function playFile(guildId, filePath, duration = 0, volume = 1.0, useQueue 
         return false;
     }
 }
+
+module.exports = {
+    join,
+    leave,
+    stopTTS,
+    getConnection,
+    speak,
+    playInterruption,
+    playFile
+};
