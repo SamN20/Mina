@@ -1,159 +1,148 @@
-# Mina - AI Voice Assistant for Discord
+# Mina - Advanced AI Voice Assistant for Discord
 
-Mina is a highly capable Discord voice bot that uses AI (LLMs) to listen, understand, and respond to users in voice channels. She features real-time transcription, a persistent memory system, and a "Satellite" architecture to control media on your local PC.
+Mina is a context-aware AI Discord bot designed to hang out in voice channels, understand natural language, and interact with users. She features long-term memory, a persistent mood system, gaming integration, and autonomous conversation capabilities. Everything is built with low llm usage in mind to keep costs down, under free tier limits for most small servers.
 
-## Features
-- 🎙️ **Real-time Transcription**: Uses Vosk (offline) or API-based transcription.
-- 🧠 **AI Intelligence**: Powered by Gemini or OpenRouter (Mistral/Llama).
-- 💾 **Memory System**: Remembers user facts and conversations across sessions.
-- 🔊 **TTS**: High-quality Text-to-Speech (Edge TTS, Azure).
-- 🌤️ **Weather Reports**: Real-time weather updates for any city.
-- 📝 **Smart Reminders**: Set reminders via Voice or DM, including "On Join" reminders.
-- 📜 **Conversation Summaries**: Ask Mina to catch you up on what you missed.
-- 🎛️ **Soundboard**: Play sound effects via voice commands.
-- 🛰️ **Satellite Client**: Control your PC's media (Spotify, YouTube) via voice commands ("Mina, pause music").
-- ⚙️ **Configurable**: Customizable wake words, personality, and voices.
+## Key Features
 
-## New Features & Commands
+### Advanced AI & Memory
+*   **Natural Conversation**: Powered by LLMs (OpenRouter/Mistral), Mina understands context, slang, and nuance.
+*   **Long-Term Memory**: Remembers users, past conversations, and personal details using Vector Search.
+*   **Context Injection**: Automatically pulls relevant memories and gaming history into the conversation.
+*   **Auto-Conversation**: Mina listens to the conversation and chimes in naturally without needing a wake word (configurable).
 
-### 🌤️ Weather
-Ask for weather updates anywhere in the world.
-- "Mina, what's the weather in London?"
-- "Mina, do I need an umbrella in Seattle?"
+### Personality & Mood
+*   **Tilt System**: Mina has a persistent "Tilt" level (0-100%) that affects her responses.
+    *   **Happy**: Helpful, cheerful, uses emojis.
+    *   **Tilted**: Sarcastic, short, might roast you.
+    *   **Rage Quit**: If she gets too tilted (100%), she will leave the voice channel.
+*   **Reactions**: Reacts to messages with context-aware emojis (e.g., "lol" -> 😂, "pizza" -> 🍕).
 
-### 📜 Conversation Summary
-Mina can summarize recent conversations so you can catch up quickly.
-- "Mina, catch me up." (Summarizes last 30 mins)
-- "Mina, summarize the last hour."
-- "Mina, what did we talk about?"
+### Gaming Integration
+*   **Backseat Gamer**: Notices what games you are playing and comments on them
+*   **Squad Finder**: Ask "Who plays Minecraft?" to find friends who play specific games.
+*   **Game Recommender**: Ask "What can we play?" to get suggestions based on the games owned by people currently in the voice channel.
+*   **Activity Tracking**: Tracks game history, play frequency, and "Squad" social graphs.
 
-### 🎛️ Soundboard
-Play sound effects stored in `data/sounds/`.
-- "Mina, play sound airhorn."
-- "Mina, play effect sad trombone."
-*(Add your own `.mp3` files to `data/sounds/`)*
+### Analytics
+*   **Heatmaps**: Tracks voice and message activity by hour and day.
+*   **Social Graph**: Builds a weighted graph of who hangs out with whom.
+*   **Status Tracking**: Monitors online/idle/dnd status patterns.
 
-### 📝 Enhanced Reminders
-**Voice:**
-- "Remind me to take out the trash in 10 minutes."
+### Utilities
+*   **Voice Transcriptions**: Real-time speech-to-text using Vosk/Whisper.
+*   **Reminders**: Natural language reminders ("Remind me to take out the trash in 10 mins" or "Remind me when I join voice").
+*   **Soundboard**: Play sound effects via voice command.
+*   **Music Control**: Integrates with external media players via Satellite.
+*   **Weather**: Get weather updates for any location.
 
-**Direct Messages (DM):**
-- DM Mina: "Remind me to check the logs in 1 hour."
-- **On Join:** DM Mina: "Remind me next time I join to say hi to Sam."
-  - Mina will remember this and speak it out the moment you join a voice channel she is in.
+---
 
-### 👻 Ghost Mode
-If enabled, Mina can perform actions even when not permanently in a channel.
-- If you join a channel and have an "On Join" reminder, Mina will briefly join, play your theme song, deliver the reminder, and then leave.
-
-## Installation
+## Installation & Setup
 
 ### Prerequisites
-- Node.js (v18+)
-- Python (3.10+)
-- FFmpeg (Added to PATH)
-- A Discord Bot Token [Get it here](https://discord.com/developers/applications)
+*   Node.js (v18+)
+*   Python 3.8+ (for Transcription/Satellite)
+*   FFmpeg
+*   A Discord Bot Token
+*   OpenRouter API Key (or other LLM provider)
 
-### Quick Start
-1.  **Clone the repo**
-2.  **Run Setup**
-    ```bash
-    node setup.js
-    ```
-    This script will:
-    - Create configuration files (`.env`, `ai_config.txt`).
-    - Install Node.js dependencies.
-    - Create a Python virtual environment (`venv`) and install required packages (`vosk`, `winsdk`, etc.).
-    - Download the Vosk small model (40MB, vosk-model-small-en-us-0.15) - lightweight and efficient.
-
-3.  **Start the Bot**
-    ```bash
-    node index.js
-    ```
-    (Or use `start_bot.bat` on Windows)
-
-## Vosk Model Selection
-
-Mina uses **vosk-model-small-en-us-0.15** (40MB) by default, which is:
-- ✅ Fast and lightweight (low CPU/memory usage)
-- ✅ Works well for clear speech
-- ✅ Suitable for servers with limited resources
-- ✅ Audio is now properly downsampled to 16kHz for optimal accuracy
-
-**Alternative Models:**
-
-If you have more powerful hardware (8+ CPU cores, 16GB+ RAM) and want better accuracy, you can manually switch to a larger model:
-
-1. Download a larger model from [Vosk Models](https://alphacephei.com/vosk/models/)
-2. Extract to `models/` directory
-3. Update `MODEL_PATH` in `transcribe.py`
-
-**Note:** Larger models (100MB+) can cause high CPU usage and transcription failures on lower-spec servers. Stick with the small model unless you have significant resources available.
-
-## GPU-Accelerated Transcription (NVIDIA GPUs)
-
-If you have an NVIDIA GPU (like the P4000), you can use **Faster-Whisper** for much better transcription:
-
-**Benefits:**
-- 🚀 **10-100x faster** than CPU transcription
-- 🎯 **Much higher accuracy** (state-of-the-art)
-- 🌍 **Better accent handling**
-- 🔇 **Better noise filtering**
-- 👥 **Better multi-speaker handling**
-
-**Setup:**
+### 1. Clone & Install
 ```bash
-./setup-gpu-transcription.sh
+git clone https://github.com/SamN20/Mina.git
+cd Mina
+npm install
 ```
 
-Then add to your `.env` file:
+### 2. Configuration
+Create a `.env` file in the root directory:
+```env
+DISCORD_TOKEN=your_discord_token
+CLIENT_ID=your_client_id
+GUILD_ID=your_guild_id (optional, for faster dev deployment)
+OPENROUTER_API_KEY=your_ai_key
 ```
-TRANSCRIPTION_ENGINE=whisper
-WHISPER_MODEL=base.en
+
+### 3. Setup Models
+Download the required voice recognition models:
+```bash
+node setup-model.js
 ```
 
-**Model Options:**
-- `tiny.en` - Fastest (39M params)
-- `base.en` - Recommended balance (74M params)
-- `small.en` - Very accurate (244M params)
-- `medium.en` - Best accuracy (769M params)
+### 4. Run
+Start the bot:
+```bash
+node index.js
+```
+*Or use the provided service script:* `systemctl start mina`
 
-Restart Mina after changing: `systemctl restart mina`
+---
 
-## Configuration
-- **Wake Words**: stored in `settings.json`. Default: `['mina', 'nina', 'tina']`.
-- **Personality**: Edit `ai_config.txt` to change how the bot behaves.
-- **API Keys**: Stored in `.env`.
+## Usage
 
-## Satellite Client (Remote Control)
-To enable Mina to control your PC (e.g., "Pause music", "What's playing?"):
+### Slash Commands
+| Command | Description |
+| :--- | :--- |
+| `/join` | Summon Mina to your voice channel. |
+| `/leave` | Dismiss Mina. |
+| `/say` | Make Mina speak text (TTS). |
+| `/manage_commands` | **(Admin)** Enable/Disable specific voice commands. |
+| `/toggle_auto` | **(Admin)** Toggle Auto-Reply for Voice or Text separately. |
+| `/toggleai` | Toggle AI generation on/off. |
+| `/reminders` | View or delete active reminders. |
+| `/profile` | View or clear your user profile/memory. |
+| `/download` | Download your voice transcript for the day. |
 
-1.  **Ensure you are on Windows** (support for `winsdk`).
-2.  **Set your User ID**:
-    - The client needs to know which Discord User it belongs to.
-    - Set the environment variable `DISCORD_USER_ID` or edit `satellite/client.py` (not recommended).
-    ```powershell
-    $env:DISCORD_USER_ID="YOUR_DISCORD_ID"
-    ```
-3.  **Run the Client**:
-    ```bash
-    call venv\Scripts\activate
-    python satellite/client.py
-    ```
-    (Or use `start_client.bat`)
+### Voice Commands (Natural Language)
+Mina listens for her wake word (default: "Mina", "Nina") or can be spoken to directly.
 
-Now say *"Mina, what's playing?"* or *"Mina, next song"*!
+*   **General Chat**: "Mina, how are you?", "Mina, tell me a joke."
+*   **Gaming**:
+    *   "Who plays [Game]?"
+    *   "What can we play?"
+    *   "Does anyone play [Game]?"
+*   **Reminders**:
+    *   "Remind me to [task] in [time]."
+    *   "Remind me to [task] when I join voice."
+*   **Utilities**:
+    *   "What is the weather in [City]?"
+    *   "Summarize the conversation."
+    *   "Set a timer for [time]."
 
-## Commands
-- `/join`: Join your voice channel.
-- `/leave`: Leave the channel.
-- `/profile view`: View what the AI knows about you.
-- `/profile clear`: Clear your memory profile.
+---
 
-## Privacy
-- All transcriptions are processed locally or via secure APIs.
-- Memory is stored locally in `data/memory.json`.
-- You can opt-out of memory logging using `/profile privacy`.
+## Project Structure
+
+```
+Mina/
+├── commands/           # Discord Slash Commands
+├── data/              # Persistent storage (Memory, Logs, Settings)
+├── models/            # Vosk/Whisper models
+├── satellite/         # Python satellite for external integrations
+├── src/
+│   ├── core/          # Core logic (Voice, Memory, NLU)
+│   ├── features/      # Feature modules (Gaming, Mood, Analytics, etc.)
+│   ├── integrations/  # External APIs (Discord, AI, Transcription)
+│   └── utils/         # Helper functions
+├── index.js           # Entry point
+└── deploy-commands.js # Slash command registrar
+```
+
+## Privacy & Data
+Mina stores data locally in the `data/` directory.
+*   **Transcripts**: Stored daily in `data/transcripts/`.
+*   **Memory**: User facts and vectors stored in `data/memory.json`.
+*   **Analytics**: Activity data stored in `data/activity.json`.
+
+You can opt-out of data collection or clear your profile using the `/privacy` and `/profile` commands.
+
+---
+
+## Contributing
+1.  Fork the repository.
+2.  Create a feature branch.
+3.  Commit your changes.
+4.  Push to the branch.
+5.  Open a Pull Request.
 
 ## License
-MIT
+[MIT](LICENSE)

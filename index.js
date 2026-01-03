@@ -12,6 +12,8 @@ const scheduler = require('./src/features/reminders/scheduler');
 const intentClassifier = require('./src/core/nlu/classifier');
 const autoConversation = require('./src/features/auto_conversation');
 const gaming = require('./src/features/gaming');
+const reactions = require('./src/features/reactions');
+const analytics = require('./src/features/analytics');
 require('./src/features'); // Load all features (Commands)
 
 // Satellite Server Setup
@@ -94,6 +96,9 @@ client.once(Events.ClientReady, c => {
     setInterval(() => {
         reminders.cleanupOldReminders();
     }, 60 * 60 * 1000); // Clean up every hour
+
+    // Initialize Analytics
+    analytics.init(client);
 });
 
 client.on(Events.InteractionCreate, async interaction => {
@@ -368,6 +373,12 @@ client.on(Events.MessageCreate, async message => {
 
     // 1. Auto-Conversation (Text Channels)
     if (message.channel.type === ChannelType.GuildText) {
+        // Track Analytics
+        analytics.trackMessage(message);
+
+        // Handle Reactions
+        reactions.handleMessage(message);
+
         // Only if message is long enough to be meaningful (lowered to 2 for testing)
         if (message.content.length > 1) {
             autoConversation.processUtterance(message.content, {
