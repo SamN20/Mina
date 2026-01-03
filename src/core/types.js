@@ -25,7 +25,8 @@ const ActionType = {
     PLAY_FILE: 'PLAY_FILE',
     SATELLITE_CMD: 'SATELLITE_CMD',
     REMINDER_SET: 'REMINDER_SET',
-    TIMER_SET: 'TIMER_SET'
+    TIMER_SET: 'TIMER_SET',
+    LEAVE: 'LEAVE'
 };
 
 const IntentType = {

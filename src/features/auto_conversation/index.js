@@ -1,3 +1,4 @@
+const mood = require('../mood');
 const storage = require('../../core/storage');
 const ai = require('../../integrations/ai');
 const audio = require('../../integrations/discord/audio');
@@ -98,15 +99,46 @@ ${debug ? '- DEBUG MODE ACTIVE: You MUST respond with something. Do not be silen
         // 5. Respond
         console.log(`[AutoConvo] Chiming in: "${response}"`);
         
+        let spokenResponse = response;
+
+        // Parse Status
+        const statusRegex = /\[status:\s*"?(.*?)"?\]/i;
+        const statusMatch = spokenResponse.match(statusRegex);
+        if (statusMatch) {
+            // We can't easily set status from here without client ref, but we can strip the tag
+            spokenResponse = spokenResponse.replace(statusRegex, '').trim();
+        }
+
+        // Parse Tilt (Mood)
+        const tiltRegex = /\[tilt:\s*([+-]?\d+)\]/i;
+        const tiltMatch = spokenResponse.match(tiltRegex);
+        if (tiltMatch) {
+            const delta = parseInt(tiltMatch[1], 10);
+            if (!isNaN(delta)) {
+                mood.modifyTilt(delta);
+            }
+            spokenResponse = spokenResponse.replace(tiltRegex, '').trim();
+        }
+
+        // Check for Rage Quit (AutoConvo)
+        if (mood.getMood().level >= 100 && type !== 'text') {
+             console.log('[AutoConvo] Tilt reached 100%. Triggering Rage Quit.');
+             audio.speak(guildId, spokenResponse);
+             setTimeout(() => {
+                 audio.leave(guildId);
+             }, 4000); // Wait for TTS to finish (approx)
+             return;
+        }
+
         if (type === 'text' && channel) {
             // Simulate typing
             await channel.sendTyping();
             // Small delay for realism
             setTimeout(() => {
-                channel.send(response);
+                channel.send(spokenResponse);
             }, 2000);
         } else {
-            audio.speak(guildId, response);
+            audio.speak(guildId, spokenResponse);
         }
         
         lastChimeTimes.set(key, now);

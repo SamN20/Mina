@@ -4,6 +4,7 @@ const registry = require('../commands/registry');
 const ai = require('../../integrations/ai');
 const memory = require('../memory');
 const { ActionType } = require('../types');
+const mood = require('../../features/mood');
 
 /**
  * Handle a user utterance
@@ -84,13 +85,33 @@ async function handleUtterance(text, context) {
     if (response) {
         // Parse status changes from response
         let spokenResponse = response;
+        
+        // Parse Status
         const statusRegex = /\[status:\s*"?(.*?)"?\]/i;
-        const statusMatch = response.match(statusRegex);
-
+        const statusMatch = spokenResponse.match(statusRegex);
         let meta = {};
         if (statusMatch) {
             meta.newStatus = statusMatch[1];
-            spokenResponse = response.replace(statusRegex, '').trim();
+            spokenResponse = spokenResponse.replace(statusRegex, '').trim();
+        }
+
+        // Parse Tilt (Mood)
+        const tiltRegex = /\[tilt:\s*([+-]?\d+)\]/i;
+        const tiltMatch = spokenResponse.match(tiltRegex);
+        if (tiltMatch) {
+            const delta = parseInt(tiltMatch[1], 10);
+            if (!isNaN(delta)) {
+                mood.modifyTilt(delta);
+            }
+            spokenResponse = spokenResponse.replace(tiltRegex, '').trim();
+        }
+
+        // Check for Rage Quit Condition (Tilt >= 100)
+        let shouldLeave = false;
+        if (mood.getMood().level >= 100) {
+            console.log('[Pipeline] Tilt reached 100%. Triggering Rage Quit.');
+            shouldLeave = true;
+            meta.newStatus = "Rage Quit";
         }
 
         // Memory learn
@@ -98,6 +119,7 @@ async function handleUtterance(text, context) {
 
         return {
             [ActionType.TTS_SPEAK]: spokenResponse,
+            [ActionType.LEAVE]: shouldLeave,
             metadata: meta
         };
     }

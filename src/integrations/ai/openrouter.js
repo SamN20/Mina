@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const storage = require('../../core/storage');
+const mood = require('../../features/mood');
 
 const FALLBACK_MODEL = 'meta-llama/llama-3.3-70b-instruct:free';
 
@@ -44,6 +45,20 @@ async function generateResponse(prompt) {
         const configPath = path.join(__dirname, '../../../ai_config.txt');
         if (fs.existsSync(configPath)) {
             systemInstruction = fs.readFileSync(configPath, 'utf8');
+        }
+        
+        // Inject Mood
+        const currentMood = mood.getMood();
+        systemInstruction += `\n\n[CURRENT STATE]\nTilt Level: ${currentMood.level}%\nMood Description: ${currentMood.description}\n`;
+        systemInstruction += `\n[INSTRUCTIONS]\nAnalyze the user's message. If they are rude, annoying, or mention things you hate (like Call of Duty), INCREASE your tilt level. If they are nice, funny, or talk about tech/coding, DECREASE it.\n`;
+        systemInstruction += `To change your tilt, include a tag like [tilt: +10] or [tilt: -5] in your response. This tag will be hidden from the user.\n`;
+        
+        if (currentMood.level >= 95) {
+            systemInstruction += "You are at MAX TILT. You are furious. Yell at them, tell them you are leaving, and then STOP TALKING.\n";
+        } else if (currentMood.level > 80) {
+            systemInstruction += "You are currently VERY ANGRY. Respond aggressively and complain about lag or teammates.\n";
+        } else if (currentMood.level > 50) {
+            systemInstruction += "You are annoyed. Be sarcastic and short.\n";
         }
     } catch (e) { }
 

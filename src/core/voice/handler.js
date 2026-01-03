@@ -76,6 +76,10 @@ async function executePlan(plan, guildId, userId, client) {
         scheduler.scheduleReminder(client, guildId, userId, plan[ActionType.TIMER_SET]);
     }
 
+    if (plan[ActionType.LEAVE]) {
+        audio.leave(guildId);
+    }
+
     // STATUS UPDATE FIX
     if (plan.metadata && plan.metadata.newStatus) {
         const { ActivityType } = require('discord.js');
@@ -190,7 +194,7 @@ function startListening(connection, guild) {
         // Only cleanup streams on error, not on normal end
         opusStream.on('error', (err) => {
             console.error(`[OpusStream Error] ${userId}:`, err);
-            cleanup();
+            
             // Kill process on error
             if (activeStreams.has(userId)) {
                 const { pythonProcess } = activeStreams.get(userId);
@@ -198,11 +202,18 @@ function startListening(connection, guild) {
                     if (pythonProcess && !pythonProcess.killed) pythonProcess.kill('SIGKILL');
                 } catch (e) { }
             }
+            cleanup();
         });
 
         pcmStream.on('error', (err) => {
+            // Ignore "Invalid packet" errors (common with Discord UDP)
+            if (err.message && err.message.includes('Invalid packet')) {
+                cleanup();
+                return;
+            }
+
             console.error(`[PCMStream Error] ${userId}:`, err);
-            cleanup();
+            
             // Kill process on error
             if (activeStreams.has(userId)) {
                 const { pythonProcess } = activeStreams.get(userId);
@@ -210,6 +221,7 @@ function startListening(connection, guild) {
                     if (pythonProcess && !pythonProcess.killed) pythonProcess.kill('SIGKILL');
                 } catch (e) { }
             }
+            cleanup();
         });
         
         // On normal end, just cleanup streams and let Python finish
