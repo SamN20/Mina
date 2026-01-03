@@ -23,6 +23,10 @@ const lastChimeTimes = new Map(); // key -> timestamp
 async function processUtterance(text, context) {
     const { guildId, username, channelId, type, channel } = context;
     
+    // Check Global Settings
+    if (type === 'text' && !storage.getAutoTextEnabled()) return;
+    if (type === 'voice' && !storage.getAutoVoiceEnabled()) return;
+
     // Use channelId as key for text channels, guildId for voice (to span across re-joins)
     // Actually, let's use channelId for everything to be specific.
     // If voiceHandler doesn't pass channelId, fallback to guildId.

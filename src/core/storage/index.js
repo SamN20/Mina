@@ -134,14 +134,17 @@ let settings = {
     aiEnabled: true,
     aiModel: null,
     triggerWords: ['mina', 'nina', 'tina'],
-    debugMode: false
+    debugMode: false,
+    autoVoiceEnabled: true, // Default to true
+    autoTextEnabled: true   // Default to true
 };
 
 // Load settings on startup
 if (fs.existsSync(SETTINGS_FILE)) {
     try {
         const data = fs.readFileSync(SETTINGS_FILE, 'utf8');
-        settings = JSON.parse(data);
+        const loaded = JSON.parse(data);
+        settings = { ...settings, ...loaded }; // Merge defaults
     } catch (e) {
         console.error('Error loading settings:', e);
     }
@@ -270,6 +273,24 @@ function setDebugMode(enabled) {
     saveSettings();
 }
 
+function getAutoVoiceEnabled() {
+    return settings.autoVoiceEnabled !== false; // Default true
+}
+
+function setAutoVoiceEnabled(enabled) {
+    settings.autoVoiceEnabled = enabled;
+    saveSettings();
+}
+
+function getAutoTextEnabled() {
+    return settings.autoTextEnabled !== false; // Default true
+}
+
+function setAutoTextEnabled(enabled) {
+    settings.autoTextEnabled = enabled;
+    saveSettings();
+}
+
 module.exports = {
     saveTranscript,
     logEvent,
@@ -296,5 +317,9 @@ module.exports = {
     getTriggerWords,
     setTriggerWords,
     getDebugMode,
-    setDebugMode
+    setDebugMode,
+    getAutoVoiceEnabled,
+    setAutoVoiceEnabled,
+    getAutoTextEnabled,
+    setAutoTextEnabled
 };

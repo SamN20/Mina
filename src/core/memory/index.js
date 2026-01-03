@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const ai = require('../../integrations/ai');
 const vector = require('./vector');
+const gamingStore = require('../../features/gaming/store');
 
 const MEMORY_FILE = path.join(process.cwd(), 'data', 'memory.json');
 const MEMORY_LOG_FILE = path.join(process.cwd(), 'data', 'memory.log');
@@ -126,7 +127,21 @@ async function getContext(userId, discordName, text = "") {
     const name = data.displayName || discordName;
     const bio = data.bio ? `\nBio: ${data.bio}` : '';
 
-    let context = `\n[User Context]\nName: ${name}${bio}\n`;
+    // Gaming Context
+    let gamingContext = "";
+    const gameStats = gamingStore.getUserStats(userId);
+    if (gameStats && gameStats.games) {
+        const games = Object.entries(gameStats.games)
+            .sort((a, b) => b[1].timesSeen - a[1].timesSeen) // Sort by frequency
+            .slice(0, 5) // Top 5
+            .map(([name, stats]) => name);
+        
+        if (games.length > 0) {
+            gamingContext = `\nKnown Games: ${games.join(', ')}`;
+        }
+    }
+
+    let context = `\n[User Context]\nName: ${name}${bio}${gamingContext}\n`;
 
     // 1. Semantic Search for Relevant Memories
     let relevantMemories = [];

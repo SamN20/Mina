@@ -11,6 +11,7 @@ const reminders = require('./src/features/reminders/store');
 const scheduler = require('./src/features/reminders/scheduler');
 const intentClassifier = require('./src/core/nlu/classifier');
 const autoConversation = require('./src/features/auto_conversation');
+const gaming = require('./src/features/gaming');
 require('./src/features'); // Load all features (Commands)
 
 // Satellite Server Setup
@@ -44,7 +45,8 @@ const client = new Client({
         GatewayIntentBits.GuildVoiceStates,
         GatewayIntentBits.DirectMessages,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildPresences
     ],
     partials: [Partials.Channel] // Required for DMs
 });
@@ -462,6 +464,10 @@ client.on(Events.MessageCreate, async message => {
     // 3. Default Chat
     // Maybe just acknowledge?
     // message.reply("I only understand reminders right now in DMs.");
+});
+
+client.on(Events.PresenceUpdate, (oldPresence, newPresence) => {
+    gaming.handlePresenceUpdate(oldPresence, newPresence);
 });
 
 client.login(process.env.DISCORD_TOKEN);
