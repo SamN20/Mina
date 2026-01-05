@@ -15,6 +15,10 @@ import urllib.error
 from pathlib import Path
 import base64
 import io
+import json
+import shutil
+import zipfile
+import tempfile
 
 try:
     from pystray import Icon, Menu, MenuItem
@@ -449,15 +453,220 @@ class SatelliteGUI:
 
     def prompt_update(self, remote_version, local_version):
         try:
-            answer = messagebox.askyesno(
+            answer = messagebox.askyesnocancel(
                 "Update Available",
-                f"A newer version of Mina Satellite is available.\n\nCurrent: {local_version}\nLatest: {remote_version}\n\nOpen download page?"
+                f"A newer version of Mina Satellite is available.\n\nCurrent: {local_version}\nLatest: {remote_version}\n\nYes = Auto-download and install\nNo = Open download page manually"
             )
-            if answer:
+            if answer is True:
+                # Auto-download and install
+                self.log(f"Starting auto-update to {remote_version}...", "INFO")
+                threading.Thread(
+                    target=self.auto_update_and_install,
+                    args=(remote_version, local_version),
+                    daemon=True
+                ).start()
+            elif answer is False:
+                # Manual download
                 webbrowser.open(RELEASE_PAGE_URL)
-                self.log("Opening release page for update...", "INFO")
+                self.log("Opening release page for manual update...", "INFO")
+            # answer is None (Cancel) - do nothing
         except Exception as e:
             self.log(f"Failed to show update prompt: {e}", "ERROR")
+
+    def get_release_zip_url(self, version):
+        """Get the download URL for a release ZIP from GitHub API"""
+        try:
+            # GitHub API endpoint for releases
+            api_url = "https://api.github.com/repos/SamN20/Mina/releases"
+            request = urllib.request.Request(
+                api_url,
+                headers={'User-Agent': 'Mina-Satellite-Client'}
+            )
+            with urllib.request.urlopen(request, timeout=10) as resp:
+                releases = json.loads(resp.read().decode("utf-8"))
+            
+            # Find the matching release
+            for release in releases:
+                release_version = release.get('tag_name', '').lstrip('v')
+                if release_version == version:
+                    # Find the satellite ZIP asset
+                    for asset in release.get('assets', []):
+                        if 'Mina-Satellite' in asset['name'] and asset['name'].endswith('.zip'):
+                            return asset['browser_download_url']
+            
+            # If not found in releases, return None
+            return None
+        except Exception as e:
+            self.log(f"Error getting release ZIP URL: {e}", "ERROR")
+            return None
+
+    def auto_update_and_install(self, remote_version, local_version):
+        """Automatically download and install the update while preserving config"""
+        try:
+            self.log("", "INFO")
+            self.log("=" * 50, "INFO")
+            self.log("AUTO-UPDATE PROCESS STARTING", "INFO")
+            self.log("=" * 50, "INFO")
+            
+            # Get the satellite directory
+            sat_dir = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            config_dir = sat_dir / "config"
+            config_file = config_dir / "satellite_config.bat"
+            
+            self.log(f"Installation directory: {sat_dir}", "INFO")
+            
+            # Step 1: Get release ZIP URL
+            self.log("Step 1: Finding release package...", "INFO")
+            zip_url = self.get_release_zip_url(remote_version)
+            if not zip_url:
+                self.log(f"✗ Could not find release package for v{remote_version}", "ERROR")
+                messagebox.showerror("Update Failed", f"Could not find release package for v{remote_version}")
+                return
+            self.log(f"✓ Found release package", "INFO")
+            
+            # Step 2: Backup config
+            self.log("Step 2: Backing up configuration...", "INFO")
+            config_backup = None
+            if config_file.exists():
+                config_backup = config_file.read_text(encoding="utf-8")
+                self.log(f"✓ Configuration backed up", "INFO")
+            else:
+                self.log("⊘ No configuration file to backup", "INFO")
+            
+            # Step 3: Download release
+            self.log("Step 3: Downloading update...", "INFO")
+            temp_dir = tempfile.mkdtemp(prefix="mina_update_")
+            zip_path = Path(temp_dir) / "satellite.zip"
+            
+            try:
+                self._download_file(zip_url, str(zip_path))
+                self.log(f"✓ Download complete ({zip_path.stat().st_size / 1024 / 1024:.1f} MB)", "INFO")
+            except Exception as e:
+                self.log(f"✗ Download failed: {e}", "ERROR")
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                messagebox.showerror("Update Failed", f"Failed to download update: {e}")
+                return
+            
+            # Step 4: Extract to temp location
+            self.log("Step 4: Extracting update...", "INFO")
+            extract_dir = Path(temp_dir) / "extracted"
+            try:
+                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                    zip_ref.extractall(extract_dir)
+                self.log(f"✓ Extraction complete", "INFO")
+            except Exception as e:
+                self.log(f"✗ Extraction failed: {e}", "ERROR")
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                messagebox.showerror("Update Failed", f"Failed to extract update: {e}")
+                return
+            
+            # Step 5: Find the satellite folder in the extracted contents
+            # GitHub releases might have the satellite folder nested
+            satellite_src = extract_dir / "satellite"
+            if not satellite_src.exists():
+                # Try to find it
+                for item in extract_dir.iterdir():
+                    if item.is_dir() and item.name == "satellite":
+                        satellite_src = item
+                        break
+            
+            if not satellite_src.exists():
+                self.log(f"✗ Could not find satellite folder in extracted files", "ERROR")
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                messagebox.showerror("Update Failed", "Could not find satellite folder in release package")
+                return
+            
+            # Step 6: Replace files (excluding config folder)
+            self.log("Step 6: Installing update...", "INFO")
+            try:
+                # Remove old files but keep config
+                for item in sat_dir.iterdir():
+                    if item.name == "config":
+                        continue  # Preserve config folder
+                    if item.is_dir():
+                        shutil.rmtree(item, ignore_errors=True)
+                    else:
+                        try:
+                            item.unlink()
+                        except:
+                            pass
+                
+                # Copy new files
+                for item in satellite_src.iterdir():
+                    if item.name == "config":
+                        continue  # Skip config folder from package
+                    if item.is_dir():
+                        shutil.copytree(item, sat_dir / item.name, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(item, sat_dir / item.name)
+                
+                self.log(f"✓ Files updated", "INFO")
+            except Exception as e:
+                self.log(f"✗ Installation failed: {e}", "ERROR")
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                messagebox.showerror("Update Failed", f"Failed to install update: {e}")
+                return
+            
+            # Step 7: Restore config
+            self.log("Step 7: Restoring configuration...", "INFO")
+            if config_backup:
+                config_dir.mkdir(parents=True, exist_ok=True)
+                config_file.write_text(config_backup, encoding="utf-8")
+                self.log(f"✓ Configuration restored", "INFO")
+            
+            # Step 8: Update version.txt
+            self.log("Step 8: Updating version file...", "INFO")
+            version_file = sat_dir / "version.txt"
+            version_file.write_text(remote_version, encoding="utf-8")
+            self.log(f"✓ Version updated to {remote_version}", "INFO")
+            
+            # Cleanup
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            
+            self.log("=" * 50, "INFO")
+            self.log("UPDATE COMPLETE!", "INFO")
+            self.log("=" * 50, "INFO")
+            self.log("", "INFO")
+            
+            # Prompt to restart
+            answer = messagebox.askyesno(
+                "Update Complete",
+                f"Update to {remote_version} installed successfully!\n\nRestart the application now?"
+            )
+            if answer:
+                self.log("Restarting application...", "INFO")
+                # Disconnect and exit
+                self.disconnect()
+                self.root.after(1000, lambda: sys.exit(0))
+            
+        except Exception as e:
+            self.log(f"✗ Unexpected error during update: {e}", "ERROR")
+            messagebox.showerror("Update Failed", f"Unexpected error: {e}")
+
+    def _download_file(self, url, destination, chunk_size=8192):
+        """Download a file from URL with progress indication"""
+        request = urllib.request.Request(
+            url,
+            headers={'User-Agent': 'Mina-Satellite-Client'}
+        )
+        
+        with urllib.request.urlopen(request, timeout=30) as response:
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded = 0
+            
+            with open(destination, 'wb') as f:
+                while True:
+                    chunk = response.read(chunk_size)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    
+                    # Log progress
+                    if total_size > 0:
+                        progress = (downloaded / total_size) * 100
+                        if downloaded % (chunk_size * 10) == 0:  # Log every 80KB
+                            self.log(f"  Downloading... {progress:.0f}%", "INFO")
 
     def create_shortcuts_dialog(self):
         """Show dialog for creating shortcuts"""
