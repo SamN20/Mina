@@ -5,8 +5,24 @@ import os
 import sys
 import asyncio
 import threading
+import subprocess
 from datetime import datetime
 import ctypes
+import webbrowser
+import urllib.parse
+import urllib.request
+import urllib.error
+from pathlib import Path
+import base64
+import io
+
+try:
+    from pystray import Icon, Menu, MenuItem
+    from PIL import Image, ImageDraw
+    PYSTRAY_AVAILABLE = True
+except ImportError:
+    PYSTRAY_AVAILABLE = False
+    print("Warning: pystray not available. System tray support disabled.")
 
 try:
     from pynput.keyboard import Key, Controller
@@ -29,6 +45,11 @@ except ImportError:
     WINSDK_AVAILABLE = False
     print("Warning: winsdk not available. 'What's playing?' feature will not work.")
 
+# Versioning (module level - always available)
+CLIENT_VERSION = "0.2.0"
+REMOTE_VERSION_URL = "https://raw.githubusercontent.com/SamN20/Mina/main/satellite/version.txt"
+RELEASE_PAGE_URL = "https://github.com/SamN20/Mina/releases/latest"
+
 def hide_console():
     """Hide the console window on Windows"""
     if sys.platform == 'win32':
@@ -47,6 +68,13 @@ class SatelliteGUI:
         self.root.title("Mina Satellite Client")
         self.root.geometry("600x700")
         self.root.resizable(False, False)
+        
+        # System tray support
+        self.tray_icon = None
+        self.is_visible = True
+        
+        # Override window close to minimize to tray
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
         # Configuration
         script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -72,6 +100,13 @@ class SatelliteGUI:
         
         # Auto-connect on startup
         self.root.after(500, self.connect)
+        # Check for updates without blocking UI
+        threading.Thread(target=self.check_for_updates, daemon=True).start()
+        # Setup system tray if available
+        if PYSTRAY_AVAILABLE:
+            self.setup_tray_icon()
+            # Show tray notification on first run
+            self.root.after(1000, self.show_tray_notification)
     
     def load_config(self):
         """Load configuration from file"""
@@ -207,6 +242,30 @@ class SatelliteGUI:
             font=("Arial", 9),
             cursor="hand2"
         ).pack()
+
+        tk.Button(
+            settings_frame,
+            text="👁️ Open Mina View",
+            command=self.open_vrm_viewer,
+            font=("Arial", 9),
+            cursor="hand2"
+        ).pack(pady=(6, 0))
+
+        tk.Button(
+            settings_frame,
+            text="🔗 Create Shortcuts",
+            command=self.create_shortcuts_dialog,
+            font=("Arial", 9),
+            cursor="hand2"
+        ).pack(pady=(6, 0))
+        
+        tk.Button(
+            settings_frame,
+            text="🔍 Test Connection",
+            command=self.test_connection,
+            font=("Arial", 9),
+            cursor="hand2"
+        ).pack(pady=(6, 0))
         
         # Activity Log
         log_frame = tk.LabelFrame(self.root, text="Activity Log", font=("Arial", 10, "bold"), padx=10, pady=10)
@@ -231,6 +290,18 @@ class SatelliteGUI:
             font=("Arial", 8),
             fg="gray"
         ).pack()
+        
+        # Tray hint
+        if PYSTRAY_AVAILABLE:
+            tray_hint = tk.Label(
+                footer,
+                text="💡 Tip: Closing this window minimizes to system tray (hidden icons area)",
+                font=("Arial", 8),
+                fg="#5865F2",
+                cursor="hand2"
+            )
+            tray_hint.pack(pady=(5, 0))
+            tray_hint.bind("<Button-1>", lambda e: self.show_tray_info())
         
         # Initial log message
         self.log("Satellite client initialized", "INFO")
@@ -318,6 +389,385 @@ class SatelliteGUI:
         window.destroy()
         self.load_config()
         self.log("Settings updated. Please reconnect if connected.", "INFO")
+
+    def open_vrm_viewer(self):
+        """Open the VRM viewer in the default browser with current credentials"""
+        try:
+            vrm_path = Path(os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrm_client.html"))
+            if not vrm_path.exists():
+                self.log("VRM client file not found.", "ERROR")
+                return
+
+            query = urllib.parse.urlencode({
+                "server": self.server_url,
+                "token": self.token,
+                "userId": f"{self.user_id}-vrm"
+            })
+            url = f"{vrm_path.as_uri()}?{query}"
+            webbrowser.open(url)
+            self.log("Opening Mina view in browser...", "INFO")
+        except Exception as e:
+            self.log(f"Failed to open Mina view: {e}", "ERROR")
+
+    def parse_version(self, version_str):
+        parts = []
+        for segment in version_str.split('.'):
+            try:
+                parts.append(int(segment))
+            except ValueError:
+                parts.append(0)
+        return tuple(parts)
+
+    def get_local_version(self):
+        try:
+            script_dir = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            version_file = script_dir / "version.txt"
+            if version_file.exists():
+                return version_file.read_text(encoding="utf-8").strip()
+        except Exception:
+            pass
+        return CLIENT_VERSION
+
+    def check_for_updates(self):
+        local_version = self.get_local_version()
+        try:
+            # Add User-Agent header for better GitHub compatibility
+            request = urllib.request.Request(
+                REMOTE_VERSION_URL,
+                headers={'User-Agent': 'Mina-Satellite-Client'}
+            )
+            with urllib.request.urlopen(request, timeout=5) as resp:
+                remote_version = resp.read().decode("utf-8").strip()
+        except (urllib.error.URLError, TimeoutError, ValueError):
+            return
+
+        try:
+            if self.parse_version(remote_version) > self.parse_version(local_version):
+                self.root.after(0, lambda: self.prompt_update(remote_version, local_version))
+        except Exception:
+            return
+
+    def prompt_update(self, remote_version, local_version):
+        try:
+            answer = messagebox.askyesno(
+                "Update Available",
+                f"A newer version of Mina Satellite is available.\n\nCurrent: {local_version}\nLatest: {remote_version}\n\nOpen download page?"
+            )
+            if answer:
+                webbrowser.open(RELEASE_PAGE_URL)
+                self.log("Opening release page for update...", "INFO")
+        except Exception as e:
+            self.log(f"Failed to show update prompt: {e}", "ERROR")
+
+    def create_shortcuts_dialog(self):
+        """Show dialog for creating shortcuts"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Create Shortcuts")
+        dialog.geometry("350x200")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        tk.Label(
+            dialog,
+            text="Create Shortcuts",
+            font=("Arial", 12, "bold"),
+            pady=15
+        ).pack()
+
+        tk.Label(
+            dialog,
+            text="Choose where to create shortcuts:",
+            font=("Arial", 9)
+        ).pack(pady=(0, 15))
+
+        button_frame = tk.Frame(dialog)
+        button_frame.pack(pady=10)
+
+        tk.Button(
+            button_frame,
+            text="📌 Desktop Only",
+            command=lambda: self.create_shortcuts(desktop=True, startmenu=False, dialog=dialog),
+            font=("Arial", 10),
+            padx=15,
+            pady=8,
+            cursor="hand2"
+        ).pack(pady=5)
+
+        tk.Button(
+            button_frame,
+            text="📂 Start Menu Only",
+            command=lambda: self.create_shortcuts(desktop=False, startmenu=True, dialog=dialog),
+            font=("Arial", 10),
+            padx=15,
+            pady=8,
+            cursor="hand2"
+        ).pack(pady=5)
+
+        tk.Button(
+            button_frame,
+            text="✨ Both",
+            command=lambda: self.create_shortcuts(desktop=True, startmenu=True, dialog=dialog),
+            font=("Arial", 10, "bold"),
+            bg="#5865F2",
+            fg="white",
+            padx=15,
+            pady=8,
+            cursor="hand2"
+        ).pack(pady=5)
+
+    def create_shortcuts(self, desktop=True, startmenu=True, dialog=None):
+        """Create shortcuts in specified locations using PowerShell"""
+        if dialog:
+            dialog.destroy()
+
+        script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        target_path = os.path.join(script_dir, "Start Satellite.bat")
+        created = []
+        failed = []
+
+        if desktop:
+            try:
+                desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
+                shortcut_path = os.path.join(desktop_path, "Mina Satellite.lnk")
+                
+                # Use PowerShell to create shortcut
+                ps_script = f'''
+$WshShell = New-Object -ComObject WScript.Shell
+$Shortcut = $WshShell.CreateShortcut("{shortcut_path}")
+$Shortcut.TargetPath = "{target_path}"
+$Shortcut.WorkingDirectory = "{script_dir}"
+$Shortcut.Description = "Mina Satellite - Voice controlled media"
+$Shortcut.Save()
+'''
+                subprocess.run(
+                    ["powershell", "-Command", ps_script],
+                    check=True,
+                    capture_output=True,
+                    text=True
+                )
+                created.append("Desktop")
+                self.log("Desktop shortcut created", "SUCCESS")
+            except Exception as e:
+                failed.append(f"Desktop: {e}")
+                self.log(f"Failed to create desktop shortcut: {e}", "ERROR")
+
+        if startmenu:
+            try:
+                start_menu = os.path.join(
+                    os.environ.get('APPDATA'),
+                    'Microsoft', 'Windows', 'Start Menu', 'Programs'
+                )
+                os.makedirs(start_menu, exist_ok=True)
+                shortcut_path = os.path.join(start_menu, "Mina Satellite.lnk")
+
+                # Use PowerShell to create shortcut
+                ps_script = f'''
+$WshShell = New-Object -ComObject WScript.Shell
+$Shortcut = $WshShell.CreateShortcut("{shortcut_path}")
+$Shortcut.TargetPath = "{target_path}"
+$Shortcut.WorkingDirectory = "{script_dir}"
+$Shortcut.Description = "Mina Satellite - Voice controlled media"
+$Shortcut.Save()
+'''
+                subprocess.run(
+                    ["powershell", "-Command", ps_script],
+                    check=True,
+                    capture_output=True,
+                    text=True
+                )
+                created.append("Start Menu")
+                self.log("Start Menu shortcut created", "SUCCESS")
+            except Exception as e:
+                failed.append(f"Start Menu: {e}")
+                self.log(f"Failed to create Start Menu shortcut: {e}", "ERROR")
+
+        # Show result
+        if created:
+            msg = f"Shortcuts created in: {', '.join(created)}"
+            if failed:
+                msg += f"\n\nFailed: {', '.join(failed)}"
+                messagebox.showwarning("Shortcuts Created", msg)
+            else:
+                messagebox.showinfo("Success", msg)
+        else:
+            messagebox.showerror("Failed", "Could not create any shortcuts.\n\n" + "\n".join(failed))
+
+    def create_tray_image(self):
+        """Create a simple icon for system tray"""
+        # Create a 64x64 icon with Mina colors
+        img = Image.new('RGB', (64, 64), color='#5865F2')
+        draw = ImageDraw.Draw(img)
+        
+        # Draw a satellite icon (simple representation)
+        draw.ellipse([20, 20, 44, 44], fill='white', outline='white')
+        draw.rectangle([32, 10, 36, 32], fill='white')
+        draw.rectangle([10, 30, 32, 34], fill='white')
+        draw.rectangle([32, 30, 54, 34], fill='white')
+        
+        return img
+
+    def setup_tray_icon(self):
+        """Setup system tray icon"""
+        try:
+            icon_image = self.create_tray_image()
+            
+            menu = Menu(
+                MenuItem('Show', self.show_window, default=True),
+                MenuItem('Hide', self.hide_window),
+                Menu.SEPARATOR,
+                MenuItem('Exit', self.quit_app)
+            )
+            
+            self.tray_icon = Icon("Mina Satellite", icon_image, "Mina Satellite", menu)
+            threading.Thread(target=self.tray_icon.run, daemon=True).start()
+            self.log("System tray icon enabled - minimize to hide", "INFO")
+        except Exception as e:
+            self.log(f"Could not setup tray icon: {e}", "WARNING")
+
+    def show_tray_notification(self):
+        """Show first-run notification about tray behavior"""
+        script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        flag_file = os.path.join(script_dir, "config", ".tray_notified")
+        
+        # Only show once
+        if not os.path.exists(flag_file):
+            messagebox.showinfo(
+                "System Tray Support",
+                "🔕 Mina Satellite minimizes to your system tray!\n\n"
+                "When you close this window, it will minimize to the "
+                "system tray instead of exiting.\n\n"
+                "Look for the Mina icon in your hidden icons area "
+                "(bottom-right corner of taskbar).\n\n"
+                "Right-click the tray icon to Show, Hide, or Exit.",
+                parent=self.root
+            )
+            # Create flag file
+            try:
+                os.makedirs(os.path.dirname(flag_file), exist_ok=True)
+                open(flag_file, 'a').close()
+            except:
+                pass
+
+    def show_tray_info(self):
+        """Show information about tray functionality"""
+        messagebox.showinfo(
+            "System Tray Info",
+            "🔕 Closing this window minimizes to system tray\n\n"
+            "The app keeps running in the background!\n\n"
+            "To find it:\n"
+            "• Look for the Mina satellite icon\n"
+            "• Usually in 'hidden icons' (^ arrow)\n"
+            "• Bottom-right corner of taskbar\n\n"
+            "Right-click the icon for options:\n"
+            "• Show - Restore the window\n"
+            "• Hide - Minimize to tray\n"
+            "• Exit - Close completely",
+            parent=self.root
+        )
+
+    def on_closing(self):
+        """Handle window close button - minimize to tray instead of exit"""
+        if PYSTRAY_AVAILABLE and self.tray_icon:
+            self.hide_window()
+            self.log("Minimized to system tray (look for 🛰️ icon in hidden icons)", "INFO")
+            # Show a brief notification balloon if available
+            try:
+                if hasattr(self.tray_icon, 'notify'):
+                    self.tray_icon.notify(
+                        "Mina Satellite is still running",
+                        "Click the tray icon to restore the window"
+                    )
+            except:
+                pass
+        else:
+            self.quit_app()
+
+    def show_window(self, icon=None, item=None):
+        """Show the main window"""
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+        self.is_visible = True
+
+    def hide_window(self, icon=None, item=None):
+        """Hide the main window to system tray"""
+        self.root.withdraw()
+        self.is_visible = False
+
+    def quit_app(self, icon=None, item=None):
+        """Properly quit the application and stop all background services"""
+        self.log("Shutting down satellite client...", "INFO")
+        
+        try:
+            # Disconnect from server if connected
+            if self.connected and self.sio:
+                try:
+                    # Schedule disconnect in the event loop
+                    future = asyncio.run_coroutine_threadsafe(self.sio.disconnect(), self.loop)
+                    # Wait up to 2 seconds for disconnect to complete
+                    future.result(timeout=2)
+                    self.log("Disconnected from server", "INFO")
+                except Exception as e:
+                    self.log(f"Error during disconnect: {e}", "WARNING")
+            
+            # Stop the event loop if it's running
+            if self.loop and self.loop.is_running():
+                try:
+                    self.loop.call_soon_threadsafe(self.loop.stop)
+                except Exception as e:
+                    self.log(f"Error stopping event loop: {e}", "WARNING")
+            
+            # Stop system tray icon
+            if self.tray_icon:
+                try:
+                    self.tray_icon.stop()
+                except Exception as e:
+                    self.log(f"Error stopping tray icon: {e}", "WARNING")
+        except Exception as e:
+            self.log(f"Error during shutdown: {e}", "ERROR")
+        
+        # Quit the application
+        self.root.quit()
+        sys.exit(0)
+    
+    def test_connection(self):
+        """Test connection to server without authentication"""
+        self.log("Testing connection to server...", "INFO")
+        
+        def test():
+            try:
+                import socket
+                import ssl
+                
+                # Parse URL
+                url = self.server_url.replace("wss://", "").replace("ws://", "").split("/")[0]
+                host = url.split(":")[0] if ":" in url else url
+                port = int(url.split(":")[1]) if ":" in url else (443 if self.server_url.startswith("wss") else 80)
+                
+                # Test basic connection
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(5)
+                
+                if self.server_url.startswith("wss"):
+                    context = ssl.create_default_context()
+                    context.check_hostname = False
+                    context.verify_mode = ssl.CERT_NONE
+                    sock = context.wrap_socket(sock, server_hostname=host)
+                
+                result = sock.connect_ex((host, port))
+                sock.close()
+                
+                if result == 0:
+                    self.root.after(0, lambda: self.log(f"✓ Server {host}:{port} is reachable", "SUCCESS"))
+                    self.root.after(0, lambda: self.log("If connection still fails, check your token or server may not be running", "INFO"))
+                else:
+                    self.root.after(0, lambda: self.log(f"✗ Cannot reach {host}:{port} - Server may be offline", "ERROR"))
+                    
+            except Exception as e:
+                self.root.after(0, lambda: self.log(f"Connection test failed: {e}", "ERROR"))
+        
+        threading.Thread(target=test, daemon=True).start()
     
     async def get_media_info(self):
         """Get current media information from Windows"""

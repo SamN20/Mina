@@ -74,6 +74,15 @@ function sendCommand(userId, command, payload = {}) {
     return false;
 }
 
+function broadcast(event, payload) {
+    if (io) {
+        io.emit(event, payload);
+        // console.log(`[Satellite] Broadcast '${event}'`);
+        return true;
+    }
+    return false;
+}
+
 function query(userId, command, timeoutMs = 3000) {
     return new Promise((resolve) => {
         const socketId = activeSatellites.get(userId);
@@ -102,4 +111,4 @@ function hasConnection(userId) {
     return activeSatellites.has(userId);
 }
 
-module.exports = { init, sendCommand, query, hasConnection };
+module.exports = { init, sendCommand, broadcast, query, hasConnection };

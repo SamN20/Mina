@@ -9,6 +9,7 @@ const {
 } = require('@discordjs/voice');
 const fs = require('fs');
 const tts = require('../tts');
+const satellite = require('../satellite');
 const storage = require('../../core/storage');
 
 // State Maps
@@ -215,6 +216,7 @@ function processQueue(guildId) {
 
         player.play(resource);
         connection.subscribe(player);
+        satellite.broadcast('speaking_start', { guildId });
 
         let timeout = null;
         if (item.duration && item.duration > 0) {
@@ -222,6 +224,7 @@ function processQueue(guildId) {
         }
 
         player.on(AudioPlayerStatus.Idle, () => {
+            satellite.broadcast('speaking_stop', { guildId });
             player.stop();
             if (timeout) clearTimeout(timeout);
             activePlayers.delete(guildId);
@@ -252,6 +255,7 @@ function processQueue(guildId) {
         });
 
         player.on('error', error => {
+            satellite.broadcast('speaking_stop', { guildId });
             console.error('Player Error:', error);
             activePlayers.delete(guildId);
             isSpeaking.set(guildId, false);

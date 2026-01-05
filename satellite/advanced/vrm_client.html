@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mina VRM Client</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
+        }
+        #status { 
+            position: absolute; 
+            top: 10px; 
+            left: 10px; 
+            color: white; 
+            font-family: 'Segoe UI', sans-serif; 
+            background: rgba(0,0,0,0.7); 
+            padding: 8px 12px; 
+            border-radius: 6px;
+            font-size: 14px;
+            backdrop-filter: blur(10px);
+        }
+        #controls { 
+            position: absolute; 
+            bottom: 10px; 
+            left: 10px; 
+            color: white; 
+            font-family: 'Segoe UI', sans-serif;
+            transition: opacity 0.5s;
+        }
+        #controls.hidden { opacity: 0; pointer-events: none; }
+        #moodIndicator {
+            position: absolute;
+            top: 50px;
+            left: 10px;
+            color: white;
+            font-family: 'Segoe UI', sans-serif;
+            background: rgba(0,0,0,0.7);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            backdrop-filter: blur(10px);
+        }
+    </style>
+    <!-- Import maps polyfill -->
+    <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.154.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.154.0/examples/jsm/",
+                "@pixiv/three-vrm": "https://unpkg.com/@pixiv/three-vrm@2.0.0/lib/three-vrm.module.js"
+            }
+        }
+    </script>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+</head>
+<body>
+    <div id="status">Connecting...</div>
+    <div id="moodIndicator">Mood: <span id="moodText">Neutral</span></div>
+    <div id="controls">
+        <label>Model URL: <input type="text" id="modelUrl" value="https://mina.nolanbc.ca/assets/Mina.vrm" style="width: 300px;"></label>
+        <button onclick="loadModel()">Load</button>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
+
+        // --- Configuration ---
+        const params = new URLSearchParams(window.location.search);
+        const SOCKET_URL = params.get('server') || 'wss://mina.nolanbc.ca';
+        const USER_ID = params.get('userId') || 'VRM_DISPLAY';
+        const TOKEN = params.get('token') || 'YOUR_TOKEN_HERE';
+        const DEFAULT_MODEL_URL = params.get('model') || 'https://mina.nolanbc.ca/assets/Mina.vrm';
+        
+        // --- Globals ---
+        let currentVrm = null;
+        let mixer = null;
+        const clock = new THREE.Clock();
+        let isSpeaking = false;
+        // Animation globals
+        const desiredLookPos = new THREE.Vector3(0, 1.35, 0);
+        let lastMouseMoveTs = performance.now();
+        let saccadeTimer = 0; // seconds until next micro eye saccade
+        const microJitter = new THREE.Vector3(0, 0, 0);
+        let gestureTimer = 0; // countdown to next subtle gesture
+        let gestureProgress = 0; // 0..1 easing progress
+        let gestureSide = 'left';
+        // Phoneme state
+        let phonemeTimer = 0;
+        let currentPhoneme = 'aa';
+        const phonemes = ['aa', 'ih', 'ou', 'ee'];
+        // Hand pose cache for subtle finger animation
+        const handPose = {
+            left: { proximal: [], intermediate: [], distal: [], hand: null },
+            right: { proximal: [], intermediate: [], distal: [], hand: null }
+        };
+        // Head tracking refs
+        let headBoneRef = null;
+        const headWorldPos = new THREE.Vector3();
+
+        // --- Bone helpers ---
+        function findBoneByRegex(root, patterns) {
+            let found = null;
+            root.traverse((obj) => {
+                if (found) return;
+                const name = obj.name || '';
+                for (const re of patterns) {
+                    if (re.test(name)) { found = obj; break; }
+                }
+            });
+            return found;
+        }
+        function getBoneSafe(vrm, name, patterns = []) {
+            return (vrm.humanoid.getNormalizedBoneNode ? vrm.humanoid.getNormalizedBoneNode(name) : null) || findBoneByRegex(vrm.scene, patterns);
+        }
+        
+        // Animation State
+        let blinkTimer = 0;
+        let isBlinking = false;
+        let blinkState = 0; // 0: Open, 1: Closing, 2: Closed, 3: Opening
+        
+        // Mood State
+        let currentMood = 'neutral'; // neutral, happy, angry, fun
+        let moodIntensity = 0.0;
+
+        // LookAt Target
+        const lookAtTarget = new THREE.Object3D();
+        
+        // --- Scene Setup ---
+        const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, logarithmicDepthBuffer: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+        renderer.sortObjects = true;
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x16213e);
+        scene.add(lookAtTarget); // Add target to scene
+
+        const camera = new THREE.PerspectiveCamera(30.0, window.innerWidth / window.innerHeight, 0.05, 10.0);
+        camera.position.set(0.0, 1.3, 2.5);
+
+        // Controls - Orbit around chest area
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(0.0, 1.3, 0.0); // Chest height for VRoid models
+        controls.enablePan = false;
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.minDistance = 0.5; // Allow close zoom without clipping
+        controls.maxDistance = 5.0;
+        controls.update();
+
+        // Lighting Setup - Warmer, softer lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
+        
+        const keyLight = new THREE.DirectionalLight(0xfff5e6, 0.6);
+        keyLight.position.set(1.0, 1.5, 1.0);
+        scene.add(keyLight);
+        
+        const fillLight = new THREE.DirectionalLight(0xb8d4ff, 0.2);
+        fillLight.position.set(-1.0, 0.5, -1.0);
+        scene.add(fillLight);
+        
+        const rimLight = new THREE.DirectionalLight(0xe6f2ff, 0.3);
+        rimLight.position.set(0.0, 1.0, -2.0);
+        scene.add(rimLight);
+
+        // --- VRM Loading ---
+        const loader = new GLTFLoader();
+        loader.register((parser) => {
+            return new VRMLoaderPlugin(parser);
+        });
+
+        window.loadModel = function() {
+            const url = document.getElementById('modelUrl').value;
+            const status = document.getElementById('status');
+            status.textContent = 'Loading Model...';
+
+            if (currentVrm) {
+                scene.remove(currentVrm.scene);
+                VRMUtils.deepDispose(currentVrm.scene);
+            }
+
+            loader.load(
+                url,
+                (gltf) => {
+                    const vrm = gltf.userData.vrm;
+                    VRMUtils.removeUnnecessaryVertices(gltf.scene);
+                    VRMUtils.removeUnnecessaryJoints(gltf.scene);
+
+                    // Calculate actual bounding box to find center
+                    const box = new THREE.Box3().setFromObject(vrm.scene);
+                    const center = new THREE.Vector3();
+                    box.getCenter(center);
+                    
+                    console.log('Model Bounding Box:', box);
+                    console.log('Model Center:', center);
+                    console.log('Model Height:', box.max.y - box.min.y);
+                    
+                    // Get chest bone position for accurate targeting
+                    const chest = vrm.humanoid.getNormalizedBoneNode('chest');
+                    const spine = vrm.humanoid.getNormalizedBoneNode('spine');
+                    
+                    let targetY = 1.0; // Default
+                    
+                    if (chest) {
+                        const chestWorldPos = new THREE.Vector3();
+                        chest.getWorldPosition(chestWorldPos);
+                        targetY = chestWorldPos.y;
+                        console.log('Chest Position:', chestWorldPos);
+                    } else if (spine) {
+                        const spineWorldPos = new THREE.Vector3();
+                        spine.getWorldPosition(spineWorldPos);
+                        targetY = spineWorldPos.y + 0.2; // Slightly above spine
+                        console.log('Spine Position:', spineWorldPos);
+                    } else {
+                        // Fallback: Use 60% of model height (approx chest)
+                        targetY = box.min.y + (box.max.y - box.min.y) * 0.6;
+                        console.log('Using calculated chest height:', targetY);
+                    }
+
+                    // Fix T-Pose (Rotate arms down)
+                    const leftUpperArm = getBoneSafe(vrm, 'leftUpperArm', [/left.*upperarm/i, /J_Bip_L_UpperArm/i]);
+                    const rightUpperArm = getBoneSafe(vrm, 'rightUpperArm', [/right.*upperarm/i, /J_Bip_R_UpperArm/i]);
+                    const leftLowerArm = getBoneSafe(vrm, 'leftLowerArm', [/left.*lowerarm/i, /J_Bip_L_LowerArm/i, /forearm.*left/i]);
+                    const rightLowerArm = getBoneSafe(vrm, 'rightLowerArm', [/right.*lowerarm/i, /J_Bip_R_LowerArm/i, /forearm.*right/i]);
+                    
+                    // Inverted rotation to bring arms DOWN
+                    if (leftUpperArm) { leftUpperArm.rotation.z = -1.2; leftUpperArm.rotation.x = 0.25; leftUpperArm.userData.baseArmZ = leftUpperArm.rotation.z; }
+                    if (rightUpperArm) { rightUpperArm.rotation.z = 1.2; rightUpperArm.rotation.x = -0.25; rightUpperArm.userData.baseArmZ = rightUpperArm.rotation.z; }
+                    if (leftLowerArm) { leftLowerArm.rotation.z = -0.2; }
+                    if (rightLowerArm) { rightLowerArm.rotation.z = 0.2; }
+                    console.log('Arm bones:', { leftUpperArm: !!leftUpperArm, rightUpperArm: !!rightUpperArm, leftLowerArm: !!leftLowerArm, rightLowerArm: !!rightLowerArm });
+
+                    // Natural Hand Pose: curl fingers, slight splay, light wrist flex
+                    const segToIndex = { Proximal: '1', Intermediate: '2', Distal: '3' };
+                    const getFingerBone = (side, finger, segment) => {
+                        const std = `${side}${finger}${segment}`; // e.g., leftIndexProximal
+                        const alt = `${side}${finger}${segToIndex[segment]}`; // e.g., leftIndex1
+                        const sideChar = side === 'left' ? 'L' : 'R';
+                        return getBoneSafe(vrm, std, [new RegExp(`J_.*_${sideChar}_.*${finger}.*${segment}`, 'i')]) 
+                            || getBoneSafe(vrm, alt, [new RegExp(`J_.*_${sideChar}_.*${finger}.*${segToIndex[segment]}`, 'i')]);
+                    };
+
+                    ['left', 'right'].forEach(side => {
+                        const sign = side === 'left' ? 1 : -1;
+                        const curlSignX = side === 'left' ? -1 : 1; // inward curl: left negative, right positive
+                        const curlSignZ = side === 'left' ? -1 : 1; // match axis for each side
+                        const splayYaw = {
+                            Index: 0.04 * sign,
+                            Middle: 0.0,
+                            Ring: -0.03 * sign,
+                            Little: -0.06 * sign
+                        };
+                        let fingerCount = 0;
+                        ['Index', 'Middle', 'Ring', 'Little'].forEach(finger => {
+                            const prox = getFingerBone(side, finger, 'Proximal');
+                            const inter = getFingerBone(side, finger, 'Intermediate');
+                            const dist = getFingerBone(side, finger, 'Distal');
+                            if (prox) { prox.rotation.x = 0.35 * curlSignX; prox.rotation.z = 0.40 * curlSignZ; prox.rotation.y = splayYaw[finger]; prox.userData.baseCurlX = prox.rotation.x; prox.userData.baseCurlZ = prox.rotation.z; handPose[side].proximal.push(prox); }
+                            if (inter) { inter.rotation.x = 0.25 * curlSignX; inter.rotation.z = 0.27 * curlSignZ; inter.userData.baseCurlX = inter.rotation.x; inter.userData.baseCurlZ = inter.rotation.z; handPose[side].intermediate.push(inter); }
+                            if (dist) { dist.rotation.x = 0.18 * curlSignX; dist.rotation.z = 0.20 * curlSignZ; dist.userData.baseCurlX = dist.rotation.x; dist.userData.baseCurlZ = dist.rotation.z; handPose[side].distal.push(dist); }
+                            if (prox || inter || dist) fingerCount++;
+                        });
+
+                        // Thumb: yaw across palm and slight curl
+                        const tProx = getFingerBone(side, 'Thumb', 'Proximal');
+                        const tInter = getFingerBone(side, 'Thumb', 'Intermediate');
+                        const tDist = getFingerBone(side, 'Thumb', 'Distal');
+                        if (tProx) { tProx.rotation.y = 0.35 * (side === 'left' ? 1 : -1); tProx.rotation.x = 0.15 * curlSignX; tProx.rotation.z = 0.12 * curlSignZ; tProx.userData.baseCurlX = tProx.rotation.x; tProx.userData.baseCurlZ = tProx.rotation.z; handPose[side].proximal.push(tProx); }
+                        if (tInter) { tInter.rotation.x = 0.12 * curlSignX; tInter.rotation.z = 0.10 * curlSignZ; tInter.userData.baseCurlX = tInter.rotation.x; tInter.userData.baseCurlZ = tInter.rotation.z; handPose[side].intermediate.push(tInter); }
+                        if (tDist) { tDist.rotation.x = 0.10 * curlSignX; tDist.rotation.z = 0.08 * curlSignZ; tDist.userData.baseCurlX = tDist.rotation.x; tDist.userData.baseCurlZ = tDist.rotation.z; handPose[side].distal.push(tDist); }
+
+                        // Wrist slight natural flex/abduction
+                        const hand = getBoneSafe(vrm, `${side}Hand`, [new RegExp(`J_Bip_${side === 'left' ? 'L' : 'R'}_Hand`, 'i')]);
+                        if (hand) {
+                            hand.rotation.x += 0.08;
+                            hand.rotation.y += 0.05 * (side === 'left' ? 1 : -1);
+                            handPose[side].hand = hand;
+                        }
+                        console.log(`${side} hand fingers detected:`, fingerCount);
+                    });
+
+                    currentVrm = vrm;
+                    scene.add(vrm.scene);
+
+                    // Improve stability when zoomed-in: prevent frustum-based popping
+                    vrm.scene.traverse((obj) => {
+                        obj.frustumCulled = false;
+                        if (obj.isMesh) {
+                            const applyMaterialTweaks = (mat) => {
+                                if (!mat) return;
+                                // Reduce close-up occlusion issues on transparent hair/strands
+                                if (mat.transparent === true) {
+                                    mat.depthWrite = false;
+                                }
+                                // Hair meshes often need double sided to avoid missing backfaces
+                                if (obj.name && /hair/i.test(obj.name)) {
+                                    mat.side = THREE.DoubleSide;
+                                    // Prefer cutout when possible to avoid alpha sort artifacts
+                                    if (mat.alphaTest !== undefined && mat.alphaTest < 0.5) {
+                                        mat.alphaTest = 0.5;
+                                    }
+                                }
+                            };
+
+                            if (Array.isArray(obj.material)) {
+                                obj.material.forEach(applyMaterialTweaks);
+                            } else {
+                                applyMaterialTweaks(obj.material);
+                            }
+                        }
+                    });
+                    
+                    // Update camera and controls to CENTER the model vertically
+                    // Position camera to frame the upper torso/face area
+                    // Use a point between geometric center and chest for better visual framing
+                    const modelHeight = box.max.y - box.min.y;
+                    const visualCenterY = center.y + (modelHeight * -0.25); // 25% below geometric center
+                    const idealCameraDistance = modelHeight * 2.5; // Increased from 1.6 to 2.5 to prevent clipping
+                    
+                    camera.position.set(0.0, visualCenterY, idealCameraDistance);
+                    controls.target.set(0.0, visualCenterY, 0.0);
+                    controls.update();
+                    
+                    console.log('Visual center Y:', visualCenterY);
+                    console.log('Camera distance:', idealCameraDistance);
+                    
+                    // Setup LookAt
+                    if (vrm.lookAt) {
+                        vrm.lookAt.target = lookAtTarget;
+                    }
+                    // Cache head bone for accurate mouse projection
+                    headBoneRef = vrm.humanoid.getNormalizedBoneNode('head');
+
+                    status.textContent = '✓ Connected';
+                    document.getElementById('controls').classList.add('hidden');
+                    console.log('VRM Loaded', vrm);
+                },
+                (progress) => {
+                    if (progress.total > 0) {
+                        console.log('Loading model...', Math.round(100.0 * (progress.loaded / progress.total)), '%');
+                    }
+                },
+                (error) => {
+                    console.error(error);
+                    status.textContent = 'Error loading model';
+                }
+            );
+        }
+
+        // --- Animation Loop ---
+        function easeInOutQuad(t) { return t < 0.5 ? 2*t*t : -1 + (4 - 2*t) * t; }
+        function clamp(v, min, max) { return Math.min(max, Math.max(min, v)); }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            controls.update(); // Required for damping
+
+            const deltaTime = clock.getDelta();
+            const elapsedTime = clock.elapsedTime;
+
+            if (currentVrm) {
+                // Update VRM (physics, blink, etc.)
+                currentVrm.update(deltaTime);
+
+                // --- Idle Animation (Breathing & Sway) ---
+                const s = Math.sin(elapsedTime * 1.0);
+                const s2 = Math.sin(elapsedTime * 0.5);
+                const s3 = Math.sin(elapsedTime * 0.35);
+                const breathe = (Math.sin(elapsedTime * 0.8) + 1) * 0.5; // 0..1
+                
+                const spine = currentVrm.humanoid.getNormalizedBoneNode('spine');
+                const head = currentVrm.humanoid.getNormalizedBoneNode('head');
+                const leftArm = currentVrm.humanoid.getNormalizedBoneNode('leftUpperArm');
+                const rightArm = currentVrm.humanoid.getNormalizedBoneNode('rightUpperArm');
+                const hips = currentVrm.humanoid.getNormalizedBoneNode('hips');
+                const chestBone = currentVrm.humanoid.getNormalizedBoneNode('chest');
+                const leftShoulder = currentVrm.humanoid.getNormalizedBoneNode('leftShoulder');
+                const rightShoulder = currentVrm.humanoid.getNormalizedBoneNode('rightShoulder');
+
+                if (spine) {
+                    spine.rotation.x = s * 0.02 + breathe * 0.015;
+                    spine.rotation.y = s2 * 0.02;
+                    spine.rotation.z = s3 * 0.01; // Slight side tilt
+                }
+                if (head) {
+                    head.rotation.y = Math.sin(elapsedTime * 0.35) * 0.05; // Subtle head turn
+                    head.rotation.z = Math.cos(elapsedTime * 0.25) * 0.02; // Subtle head tilt
+                }
+                // Arm sway (breathing effect)
+                if (leftArm) leftArm.rotation.z = (leftArm.userData.baseArmZ ?? -1.2) + (s * 0.03) + breathe * 0.01;
+                if (rightArm) rightArm.rotation.z = (rightArm.userData.baseArmZ ?? 1.2) - (s * 0.03) - breathe * 0.01;
+
+                if (chestBone) {
+                    chestBone.rotation.x = breathe * 0.02; // inhale lift
+                }
+                if (leftShoulder) leftShoulder.rotation.x = breathe * 0.01;
+                if (rightShoulder) rightShoulder.rotation.x = breathe * 0.01;
+
+                // Hips sway (weight shifting)
+                if (hips) {
+                    hips.position.y = Math.sin(elapsedTime * 1.5) * 0.005; // Up/Down bounce
+                    hips.rotation.y = Math.cos(elapsedTime * 0.5) * 0.02; // Rotation
+                }
+
+                // --- Mood-based posture ---
+                let moodUpright = 0, moodLean = 0, moodTilt = 0;
+                if (currentMood === 'happy') { moodUpright = 0.02; moodTilt = 0.01; }
+                else if (currentMood === 'neutral') { moodUpright = 0.0; }
+                else if (currentMood === 'annoyed') { moodLean = 0.015; }
+                else if (currentMood === 'angry') { moodLean = 0.03; }
+                if (spine) spine.rotation.x += moodUpright - moodLean;
+                if (head) head.rotation.x += -moodLean * 0.5;
+                if (leftShoulder) leftShoulder.rotation.z += -moodLean * 0.5;
+                if (rightShoulder) rightShoulder.rotation.z += moodLean * 0.5;
+
+                // --- Occasional subtle hand gesture ---
+                gestureTimer -= deltaTime;
+                if (gestureTimer <= 0) {
+                    gestureTimer = 5 + Math.random() * 7;
+                    gestureProgress = 0;
+                    gestureSide = Math.random() < 0.5 ? 'left' : 'right';
+                }
+                if (gestureProgress < 1) {
+                    gestureProgress = clamp(gestureProgress + deltaTime * 0.5, 0, 1);
+                    const p = easeInOutQuad(gestureProgress);
+                    const raise = (Math.sin(elapsedTime * 0.5) * 0.01) + p * 0.08; // up to ~4.5°
+                    if (gestureSide === 'left' && leftArm) leftArm.rotation.x = raise;
+                    if (gestureSide === 'right' && rightArm) rightArm.rotation.x = raise;
+                }
+
+                // --- Blinking Logic ---
+                blinkTimer -= deltaTime;
+                if (blinkTimer <= 0 && !isBlinking) {
+                    isBlinking = true;
+                    blinkState = Math.random() < 0.2 ? 0.5 : 1.0; // sometimes half-blink
+                    blinkTimer = Math.random() * 3 + 2; // Blink every 2-5 seconds
+                }
+
+                if (isBlinking) {
+                    // Eased close-open
+                    const speed = 8.0;
+                    let v = currentVrm.expressionManager.getValue('blink');
+                    const direction = v < blinkState ? 1 : -1;
+                    v = clamp(v + direction * deltaTime * speed, 0, blinkState);
+                    currentVrm.expressionManager.setValue('blink', v);
+                    if ((direction < 0 && v === 0) || (direction > 0 && v === blinkState)) {
+                        // reverse once reached peak, then finish when open
+                        if (direction > 0) { currentVrm.expressionManager.setValue('blink', blinkState); }
+                        blinkState = 0; // open target
+                        if (v === 0) { isBlinking = false; }
+                    }
+                }
+
+                // --- Lip Sync Logic ---
+                if (isSpeaking) {
+                    phonemeTimer -= deltaTime;
+                    if (phonemeTimer <= 0) {
+                        phonemeTimer = 0.06 + Math.random() * 0.1; // ~6–16 fps phoneme changes
+                        currentPhoneme = phonemes[Math.floor(Math.random() * phonemes.length)];
+                    }
+                    const mouth = (Math.sin(elapsedTime * 18) * 0.5 + 0.5) * 0.8; // base openness
+                    // fade all to 0, raise current
+                    ['aa','ih','ou','ee'].forEach(p => currentVrm.expressionManager.setValue(p, p === currentPhoneme ? mouth : 0));
+                    if (head) head.rotation.x += Math.sin(elapsedTime * 3.0) * 0.005; // tiny head nod while talking
+                } else {
+                    ['aa','ih','ou','ee'].forEach(p => currentVrm.expressionManager.setValue(p, 0));
+                }
+
+                // --- Subtle finger breathing flex ---
+                handPose.left.proximal.forEach(b => { b.rotation.x = b.userData.baseCurlX + breathe * 0.01 + Math.sin(elapsedTime * 0.7) * 0.005; if (b.userData.baseCurlZ !== undefined) b.rotation.z = b.userData.baseCurlZ + breathe * 0.008; });
+                handPose.right.proximal.forEach(b => { b.rotation.x = b.userData.baseCurlX + breathe * 0.01 + Math.sin(elapsedTime * 0.7) * 0.005; if (b.userData.baseCurlZ !== undefined) b.rotation.z = b.userData.baseCurlZ + breathe * 0.008; });
+                handPose.left.intermediate.forEach(b => { b.rotation.x = b.userData.baseCurlX + breathe * 0.008; if (b.userData.baseCurlZ !== undefined) b.rotation.z = b.userData.baseCurlZ + breathe * 0.006; });
+                handPose.right.intermediate.forEach(b => { b.rotation.x = b.userData.baseCurlX + breathe * 0.008; if (b.userData.baseCurlZ !== undefined) b.rotation.z = b.userData.baseCurlZ + breathe * 0.006; });
+                handPose.left.distal.forEach(b => { b.rotation.x = b.userData.baseCurlX + breathe * 0.006; if (b.userData.baseCurlZ !== undefined) b.rotation.z = b.userData.baseCurlZ + breathe * 0.004; });
+                handPose.right.distal.forEach(b => { b.rotation.x = b.userData.baseCurlX + breathe * 0.006; if (b.userData.baseCurlZ !== undefined) b.rotation.z = b.userData.baseCurlZ + breathe * 0.004; });
+
+                // --- Smooth gaze + micro-saccades ---
+                if (headBoneRef) headBoneRef.getWorldPosition(headWorldPos);
+                saccadeTimer -= deltaTime;
+                const idle = (performance.now() - lastMouseMoveTs) > 1200;
+                if (idle && saccadeTimer <= 0) {
+                    saccadeTimer = 0.4 + Math.random() * 1.0;
+                    microJitter.set((Math.random()-0.5) * 0.08, (Math.random()-0.5) * 0.06, 0);
+                }
+                const target = desiredLookPos.clone().add(microJitter);
+                lookAtTarget.position.lerp(target, 0.12);
+            }
+
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // --- Input Handling (LookAt) ---
+        window.addEventListener('mousemove', (event) => {
+            const x = (event.clientX / window.innerWidth) * 2.0 - 1.0;
+            const y = -(event.clientY / window.innerHeight) * 2.0 + 1.0;
+
+            // Project mouse position to world space at a fixed distance
+            const vector = new THREE.Vector3(x, y, 0.5);
+            vector.unproject(camera);
+            const dir = vector.sub(camera.position).normalize();
+            // Intersect ray at head depth so eyes always aim near head
+            const headPos = headWorldPos.clone();
+            const distToHead = camera.position.distanceTo(headPos);
+            const hit = camera.position.clone().add(dir.multiplyScalar(distToHead));
+
+            // Clamp relative to head to keep natural eye movement limits
+            const delta = hit.clone().sub(headPos);
+            delta.x = THREE.MathUtils.clamp(delta.x, -0.3, 0.3);
+            delta.y = THREE.MathUtils.clamp(delta.y, -0.25, 0.25);
+            // Keep the target slightly in front of the head to avoid zero-length look vectors
+            const camForward = headPos.clone().sub(camera.position).normalize();
+            const forwardOffset = camForward.multiplyScalar(0.15);
+
+            // Central deadzone: prevent jitter/weirdness when mouse is near the head center
+            if ((Math.abs(x) < 0.02 && Math.abs(y) < 0.02) || delta.lengthSq() < 0.001) {
+                delta.set(0, 0.05, 0); // gentle upward bias
+            }
+
+            // Keep the relative target on the head's plane; forwardOffset adds actual depth
+            delta.z = 0;
+
+            desiredLookPos.copy(headPos).add(delta).add(forwardOffset);
+            lastMouseMoveTs = performance.now();
+        });
+
+        // --- Socket.io Integration ---
+        // Prefill model input from query so the viewer can be launched with a preselected model
+        document.getElementById('modelUrl').value = DEFAULT_MODEL_URL;
+
+        const socket = io(SOCKET_URL);
+        const statusDiv = document.getElementById('status');
+
+        socket.on('connect', () => {
+            statusDiv.textContent = `Connected to ${SOCKET_URL}`;
+            // Use credentials passed in from the satellite client so the user does not re-enter them
+            socket.emit('register', { userId: USER_ID, token: TOKEN });
+        });
+
+        socket.on('disconnect', () => {
+            statusDiv.textContent = 'Disconnected';
+        });
+
+        socket.on('speaking_start', () => {
+            console.log('Speaking Start');
+            isSpeaking = true;
+        });
+
+        socket.on('speaking_stop', () => {
+            console.log('Speaking Stop');
+            isSpeaking = false;
+        });
+
+        socket.on('mood_update', (data) => {
+            console.log('Mood Update:', data);
+            const level = data.level; // 0-100
+            const moodText = document.getElementById('moodText');
+            
+            if (!currentVrm) return;
+            
+            // Smooth transition - don't hard reset
+            let targetHappy = 0, targetAngry = 0, targetRelaxed = 0;
+
+            if (level < 20) {
+                currentMood = 'happy';
+                targetHappy = 0.8;
+                moodText.textContent = '😊 Happy';
+                moodText.style.color = '#4CAF50';
+            } else if (level < 50) {
+                currentMood = 'neutral';
+                targetRelaxed = 0.3;
+                moodText.textContent = '😐 Neutral';
+                moodText.style.color = '#2196F3';
+            } else if (level < 80) {
+                currentMood = 'annoyed';
+                targetAngry = 0.5;
+                moodText.textContent = '😠 Annoyed';
+                moodText.style.color = '#FF9800';
+            } else {
+                currentMood = 'angry';
+                targetAngry = 1.0;
+                moodText.textContent = '😡 Angry';
+                moodText.style.color = '#F44336';
+            }
+            
+            // Smooth lerp to target expressions
+            const lerpSpeed = 0.05;
+            const interval = setInterval(() => {
+                if (!currentVrm) { clearInterval(interval); return; }
+                
+                let happy = currentVrm.expressionManager.getValue('happy');
+                let angry = currentVrm.expressionManager.getValue('angry');
+                let relaxed = currentVrm.expressionManager.getValue('relaxed');
+                
+                happy += (targetHappy - happy) * lerpSpeed;
+                angry += (targetAngry - angry) * lerpSpeed;
+                relaxed += (targetRelaxed - relaxed) * lerpSpeed;
+                
+                currentVrm.expressionManager.setValue('happy', happy);
+                currentVrm.expressionManager.setValue('angry', angry);
+                currentVrm.expressionManager.setValue('relaxed', relaxed);
+                
+                if (Math.abs(happy - targetHappy) < 0.01 && 
+                    Math.abs(angry - targetAngry) < 0.01 && 
+                    Math.abs(relaxed - targetRelaxed) < 0.01) {
+                    clearInterval(interval);
+                }
+            }, 16);
+        });
+
+        // Initial Load
+        loadModel();
+
+        // Handle Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Ensure camera looks at head height on load
+        // camera.lookAt(0.0, 1.4, 0.0); // Removed in favor of OrbitControls
+    </script>
+</body>
+</html>

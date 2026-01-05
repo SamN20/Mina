@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const satellite = require('../../integrations/satellite');
 
 const MOOD_FILE = path.join(process.cwd(), 'data', 'mood.json');
 let tiltLevel = 0; // 0 to 100
@@ -50,6 +51,14 @@ function modifyTilt(amount) {
     if (oldLevel !== tiltLevel) {
         console.log(`[Mood] Tilt changed: ${oldLevel} -> ${tiltLevel} (Delta: ${amount})`);
         saveMood();
+
+        // Broadcast mood update
+        const mood = getMood();
+        satellite.broadcast('mood_update', { 
+            level: tiltLevel, 
+            description: mood.description,
+            delta: amount 
+        });
     }
 }
 

@@ -18,6 +18,39 @@ require('./src/features'); // Load all features (Commands)
 
 // Satellite Server Setup
 const server = http.createServer((req, res) => {
+    // Serve Static Assets (e.g. VRM models)
+    if (req.url.startsWith('/assets/')) {
+        // Basic path sanitization
+        const safePath = path.normalize(req.url).replace(/^(\.\.[\/\\])+/, '');
+        const filePath = path.join(__dirname, safePath);
+        
+        // Ensure we are still in the assets folder
+        if (!filePath.startsWith(path.join(__dirname, 'assets'))) {
+            res.writeHead(403);
+            res.end('Forbidden');
+            return;
+        }
+
+        fs.readFile(filePath, (err, data) => {
+            if (err) {
+                res.writeHead(404);
+                res.end('File not found');
+                return;
+            }
+            
+            // CORS headers for the web client
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            
+            if (filePath.endsWith('.vrm')) {
+                res.setHeader('Content-Type', 'model/gltf-binary');
+            }
+            
+            res.writeHead(200);
+            res.end(data);
+        });
+        return;
+    }
+
     res.writeHead(200);
     res.end('Mina Satellite Uplink Online');
 });
