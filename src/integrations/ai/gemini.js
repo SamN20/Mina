@@ -1,6 +1,7 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const fs = require('fs');
 const path = require('path');
+const vrmAnimation = require('../../core/vrm/animation');
 
 // Model Configuration with Fallback Chain
 const MODELS = [
@@ -35,7 +36,16 @@ async function generateResponse(prompt) {
     }
 
     // Construct full prompt
-    const fullPrompt = `${systemInstruction}\n\nUser: ${prompt}\n\nResponse (Keep it short and casual, under 2 sentences):`;
+    const fullPrompt = `${systemInstruction}
+
+[Instructions]
+- Keep it short and casual, under 2 sentences.
+- You can perform animations by including [anim:Name] in your response.
+- Available animations: ${vrmAnimation.getAvailableAnimations()}.
+
+User: ${prompt}
+
+Response:`;
 
     for (const modelName of MODELS) {
         try {

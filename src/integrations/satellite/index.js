@@ -111,4 +111,136 @@ function hasConnection(userId) {
     return activeSatellites.has(userId);
 }
 
-module.exports = { init, sendCommand, broadcast, query, hasConnection };
+// --- VRM Animation Controls ---
+
+/**
+ * Play a gesture animation on the VRM model
+ * @param {string} userId - User ID or 'VRM_DISPLAY' for the display client
+ * @param {string} gesture - Gesture type: wave, nod, shake, shrug, point, think, jump, cheer
+ * @param {number} duration - Duration in seconds (default: 2.0)
+ */
+function playGesture(userId, gesture, duration = 2.0) {
+    if (!io) return false;
+
+    if (!userId) {
+        io.emit('gesture', { type: gesture, duration });
+        console.log(`[Satellite] Broadcast gesture '${gesture}'`);
+        return true;
+    }
+
+    const socketId = activeSatellites.get(userId);
+    if (!socketId) {
+        console.log(`[Satellite] Cannot play gesture: User ${userId} not connected`);
+        return false;
+    }
+
+    io.to(socketId).emit('gesture', { type: gesture, duration });
+    console.log(`[Satellite] Playing gesture '${gesture}' for ${userId}`);
+    return true;
+}
+
+/**
+ * Play an emote animation on the VRM model
+ * @param {string} userId - User ID or 'VRM_DISPLAY' for the display client
+ * @param {string} emote - Emote type: laugh, surprised, sad, confused
+ * @param {number} duration - Duration in seconds (default: 2.0)
+ * @param {number} intensity - Intensity 0-1 (default: 0.8)
+ */
+function playEmote(userId, emote, duration = 2.0, intensity = 0.8) {
+    if (!io) return false;
+
+    if (!userId) {
+        io.emit('emote', { type: emote, duration, intensity });
+        console.log(`[Satellite] Broadcast emote '${emote}'`);
+        return true;
+    }
+
+    const socketId = activeSatellites.get(userId);
+    if (!socketId) {
+        console.log(`[Satellite] Cannot play emote: User ${userId} not connected`);
+        return false;
+    }
+
+    io.to(socketId).emit('emote', { type: emote, duration, intensity });
+    console.log(`[Satellite] Playing emote '${emote}' for ${userId}`);
+    return true;
+}
+
+/**
+ * Set a facial expression on the VRM model
+ * @param {string} userId - User ID or 'VRM_DISPLAY' for the display client
+ * @param {string} expression - Expression type: happy, angry, sad, surprised, relaxed, neutral
+ * @param {number} intensity - Intensity 0-1 (default: 0.8)
+ * @param {number} duration - Duration in seconds (0 = indefinite, default: 0)
+ */
+function setExpression(userId, expression, intensity = 0.8, duration = 0) {
+    if (!io) return false;
+
+    if (!userId) {
+        io.emit('expression', { type: expression, intensity, duration });
+        console.log(`[Satellite] Broadcast expression '${expression}'`);
+        return true;
+    }
+
+    const socketId = activeSatellites.get(userId);
+    if (!socketId) {
+        console.log(`[Satellite] Cannot set expression: User ${userId} not connected`);
+        return false;
+    }
+
+    io.to(socketId).emit('expression', { type: expression, intensity, duration });
+    console.log(`[Satellite] Setting expression '${expression}' for ${userId}`);
+    return true;
+}
+
+/**
+ * Play a body language animation
+ * @param {string} userId - User ID or 'VRM_DISPLAY' for the display client
+ * @param {string} pose - Pose type: lean_forward, lean_back, cross_arms, hands_on_hips
+ * @param {number} duration - Duration in seconds (default: 3.0)
+ */
+function playPose(userId, pose, duration = 3.0) {
+    if (!io) return false;
+
+    if (!userId) {
+        io.emit('gesture', { type: pose, duration });
+        console.log(`[Satellite] Broadcast pose '${pose}'`);
+        return true;
+    }
+
+    const socketId = activeSatellites.get(userId);
+    if (!socketId) {
+        console.log(`[Satellite] Cannot play pose: User ${userId} not connected`);
+        return false;
+    }
+
+    io.to(socketId).emit('gesture', { type: pose, duration });
+    console.log(`[Satellite] Playing pose '${pose}' for ${userId}`);
+    return true;
+}
+
+/**
+ * Broadcast speaking state to VRM (for lip sync)
+ * @param {boolean} speaking - Whether Mina is speaking
+ */
+function setSpeaking(speaking) {
+    if (io) {
+        io.emit(speaking ? 'speaking_start' : 'speaking_stop');
+        return true;
+    }
+    return false;
+}
+
+module.exports = { 
+    init, 
+    sendCommand, 
+    broadcast, 
+    query, 
+    hasConnection,
+    // VRM Animation functions
+    playGesture,
+    playEmote,
+    setExpression,
+    playPose,
+    setSpeaking
+};

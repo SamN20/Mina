@@ -2,6 +2,8 @@ const mood = require('../mood');
 const storage = require('../../core/storage');
 const ai = require('../../integrations/ai');
 const audio = require('../../integrations/discord/audio');
+const satellite = require('../../integrations/satellite');
+const vrmAnimation = require('../../core/vrm/animation');
 const { ActionType } = require('../../core/types');
 
 // Configuration
@@ -89,6 +91,8 @@ ${transcript}
 - If you want to speak, output your response directly.
 - If you want to stay silent, output "SILENT".
 - Keep response under 2 sentences.
+- You can perform animations by including [anim:Name] in your response.
+- Available animations: ${vrmAnimation.getAvailableAnimations()}.
 ${debug ? '- DEBUG MODE ACTIVE: You MUST respond with something. Do not be silent.' : ''}
 `;
 
@@ -122,6 +126,25 @@ ${debug ? '- DEBUG MODE ACTIVE: You MUST respond with something. Do not be silen
                 mood.modifyTilt(delta);
             }
             spokenResponse = spokenResponse.replace(tiltRegex, '').trim();
+        }
+
+        // Parse Animations (Multi-Support)
+        const animRegex = /\[anim:\s*(.*?)\]/gi;
+        const animMatches = [...spokenResponse.matchAll(animRegex)];
+        
+        if (animMatches.length > 0) {
+            animMatches.forEach((m, index) => {
+                const animName = m[1].trim();
+                console.log(`[AutoConvo] Triggering animation: ${animName}`);
+                setTimeout(() => {
+                    if (satellite && satellite.playGesture) {
+                        satellite.playGesture(null, animName); 
+                    } else if (satellite && satellite.broadcast) {
+                        satellite.broadcast('gesture', { type: animName, duration: 4.0 });
+                    }
+                }, index * 2500);
+            });
+            spokenResponse = spokenResponse.replace(animRegex, '').trim();
         }
 
         // Check for Rage Quit (AutoConvo)

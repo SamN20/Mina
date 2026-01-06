@@ -5,6 +5,7 @@ const ai = require('../../integrations/ai');
 const memory = require('../memory');
 const { ActionType } = require('../types');
 const mood = require('../../features/mood');
+const vrmAnimation = require('../vrm/animation');
 
 /**
  * Handle a user utterance
@@ -104,6 +105,51 @@ async function handleUtterance(text, context) {
                 mood.modifyTilt(delta);
             }
             spokenResponse = spokenResponse.replace(tiltRegex, '').trim();
+        }
+
+        // Parse Animations (Tag System) - Support Multiple
+        const animRegex = /\[anim:\s*(.*?)\]/gi;
+        let triggeredAnim = null;
+        let match;
+        
+        // Find all matches
+        const satellite = require('../../integrations/satellite');
+        
+        // We use a temporary string to avoid infinite loop if we were replacing in place using exec
+        // But cleaner way: match all, then replace all
+        const animMatches = [...spokenResponse.matchAll(animRegex)];
+        
+        if (animMatches.length > 0) {
+            animMatches.forEach((m, index) => {
+                const animName = m[1].trim();
+                console.log(`[Pipeline] AI Triggered Animation: ${animName}`);
+                triggeredAnim = animName; // Just track at least one was found
+                
+                // Play with slight delay between if multiple? 
+                // Currently satellite just blasts them. 
+                // Let's stagger them slightly if multiple? e.g. 2s apart
+                setTimeout(() => {
+                     if (satellite && satellite.playGesture) {
+                        satellite.playGesture(null, animName);
+                    } else if (satellite && satellite.broadcast) {
+                        satellite.broadcast('gesture', { type: animName, duration: 4.0 });
+                    }
+                }, index * 2500);
+            });
+            
+            // Remove tags from speech
+            spokenResponse = spokenResponse.replace(animRegex, '').trim();
+        }
+
+        // Trigger VRM animations based on keywords (Legacy/Fallback)
+        // Only if AI didn't explicitly ask for one
+        if (!triggeredAnim) {
+            try {
+                const currentMood = mood.getMood();
+                vrmAnimation.triggerAnimationForResponse(spokenResponse, { mood: currentMood });
+            } catch (err) {
+                console.error('[VRM Animation] Error:', err);
+            }
         }
 
         // Check for Rage Quit Condition (Tilt >= 100)

@@ -178,6 +178,13 @@ The satellite app also checks GitHub for updates automatically on startup and wi
 - Check if your firewall is blocking the connection
 - Try clicking "Connect" button in the satellite window
 
+**"Connection error: http://socket.io/..."**
+- This means your server URL is empty or incorrectly formatted
+- Open Settings and verify the server address
+- Server URL must start with `ws://`, `wss://`, `http://`, or `https://`
+- Example: `wss://yourserver.com:3000` or `http://192.168.1.100:3000`
+- DO NOT use `socket.io` - that's the library name, not your server
+
 **Authentication Error**
 - The satellite token doesn't match the server's expectations
 - Verify the token with your bot administrator
@@ -208,6 +215,35 @@ The satellite client automatically checks for new versions on startup:
 5. This all happens in the background without delaying startup
 
 If you want to manually check: Simply restart the application.
+
+### VRM Avatar System
+
+The satellite includes two versions of the VRM Avatar Client in the `advanced/` folder:
+
+1. **User Client (Default)**: `vrm_client.html`
+   - Clean, cinematic view with no overlays
+   - Perfect for OBS capture or second monitor display
+   - Accessed via "Open Mina View" in the main app
+   - **New Features**: 
+     - 🖱️ **Hover Controls**: Move mouse to corners to see controls
+     - 🔄 **Rotate**: Start facing wrong way? Click to rotate 180°
+     - 🎨 **Backgrounds**: Toggle between transparent (for OBS) and Cyberpunk theme
+
+2. **Developer Client**: `vrm_client_DEV_V3.html`
+   - Includes on-screen debug logs and status indicators
+   - Useful for troubleshooting animation issues or connection problems
+   - Can be opened manually in any browser
+
+### Animation System
+
+Mina now supports full body animations and facial expressions!
+
+- **🤖 Automatic**: Mina automatically waves hello, laughs at jokes, and nods in agreement during conversation.
+- **🎮 Manual Control**: Use the `/animate` command in Discord (e.g., `/animate type:wave`).
+- **Available Animations**:
+  - **Gestures**: Wave, Nod, Shake, Shrug, Point, Think, Jump, Cheer
+  - **Emotes**: Laugh, Surprised, Sad, Confused
+  - **Dances**: Hip Hop, Rumba
 
 ### Command-Line Client
 

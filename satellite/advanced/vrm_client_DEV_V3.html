@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mina VRM Avatar</title>
+    <title>Mina VRM Client V3 (Retargeter)</title>
     
     <!-- Config Loading -->
     <script src="vrm_config.js" onerror="console.log('No local config found')"></script>
@@ -22,36 +22,17 @@
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 
     <style>
-        body { margin: 0; overflow: hidden; background-color: #000000; color: white; transition: background 0.5s; }
-        #drag-handle { position: absolute; top: 0; left: 0; width: 100%; height: 20px; -webkit-app-region: drag; z-index: 100; }
-        
-        /* UI Overlay - Hidden by default, visible on hover of top-right area */
-        #ui-controls {
-            position: absolute; top: 10px; right: 10px;
-            display: flex; gap: 10px;
-            opacity: 0; transition: opacity 0.3s;
-            z-index: 200;
-        }
-        #ui-controls:hover, body:hover #ui-controls { opacity: 1; }
-        
-        .btn {
-            background: rgba(0,0,0,0.6); border: 1px solid #444; color: #ccc;
-            padding: 5px 10px; border-radius: 4px; cursor: pointer; font-family: sans-serif; font-size: 12px;
-        }
-        .btn:hover { background: rgba(50,50,50,0.8); color: white; }
-
-        .bg-gradient {
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-        }
+        body { margin: 0; overflow: hidden; background-color: #0d0d16; color: white; font-family: monospace; }
+        #status { position: absolute; top: 10px; left: 10px; padding: 8px; background: rgba(0,0,0,0.8); border: 1px solid #444; border-radius: 4px; pointer-events: none; z-index: 10; }
+        #logs { position: absolute; bottom: 10px; left: 10px; width: 400px; height: 150px; overflow-y: auto; font-size: 12px; background: rgba(0,0,0,0.8); border: 1px solid #444; padding: 5px; pointer-events: none; }
+        .log-entry { margin: 2px 0; border-bottom: 1px solid #222; }
+        #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: none; font-size: 24px; text-shadow: 0 0 10px black; }
     </style>
 </head>
 <body>
-    <div id="drag-handle"></div>
-    
-    <div id="ui-controls">
-        <button class="btn" onclick="toggleBg()">Toggle BG</button>
-        <button class="btn" onclick="rotateModel()">Rotate 180°</button>
-    </div>
+    <div id="status">VRM Client V3: Initializing...</div>
+    <div id="logs"></div>
+    <div id="loading">RETARGETING IN PROGRESS...</div>
 
     <script type="module">
         import * as THREE from 'three';
@@ -62,15 +43,18 @@
 
         // --- Utils ---
         function log(msg, type='info') {
-            // Internal log only for clean client
-            // Debuggers can see this in console (F12)
-            if (type === 'error' || type === 'warn') {
-                 console.log(`[V3] ${msg}`);
-            }
+            console.log(`[V3] ${msg}`);
+            const el = document.getElementById('logs');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.style.color = type === 'error' ? '#ff5555' : (type === 'warn' ? '#ffaa00' : '#88ccff');
+            entry.textContent = `> ${msg}`;
+            el.appendChild(entry);
+            el.scrollTop = el.scrollHeight;
         }
 
         function setStatus(msg) {
-            // No-op for clean client
+            document.getElementById('status').textContent = `V3: ${msg}`;
         }
 
         // --- Configuration ---
@@ -109,6 +93,7 @@
         let lookTime = 0;
 
         // --- Mixamo -> VRM Bone Map ---
+        // Enhanced map with fingers and alternatives
         const MIXAMO_MAP = {
             'hips': 'hips', 'mixamorig:Hips': 'hips', 'mixamorigHips': 'hips',
             'spine': 'spine', 'mixamorig:Spine': 'spine', 'mixamorigSpine': 'spine',
@@ -154,13 +139,17 @@
             renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(window.devicePixelRatio);
+            // SRGB Encoding is important for VRM
             renderer.outputColorSpace = THREE.SRGBColorSpace; 
             document.body.appendChild(renderer.domElement);
 
             // Scene
             scene = new THREE.Scene();
             
-            // Helpers - Hidden in Prod
+            // Helpers
+            const grid = new THREE.GridHelper(10, 10, 0x444444, 0x222222);
+            scene.add(grid);
+            scene.add(new THREE.AxesHelper(1)); // Red: X, Green: Y, Blue: Z
             scene.add(lookAtTargetObj);
 
             // Camera
@@ -175,7 +164,6 @@
             // Orbit Controls
             const controls = new OrbitControls(camera, renderer.domElement);
             controls.target.set(0, 1.0, 0);
-            controls.enableDamping = true;
             controls.update();
 
             clock = new THREE.Clock();
@@ -205,8 +193,8 @@
                 scene.add(vrm.scene);
                 
                 // Correction
-                vrm.scene.rotation.y = Math.PI; 
-                VRMUtils.rotateVRM0(vrm); 
+                vrm.scene.rotation.y = Math.PI; // Standard VRM faces +Z, we want -Z (towards camera)
+                VRMUtils.rotateVRM0(vrm); // Legacy fix if VRM0
 
                 // Init Mixer
                 mixer = new THREE.AnimationMixer(vrm.scene);
@@ -235,15 +223,15 @@
             const filename = animationName.toLowerCase().endsWith('.fbx') ? animationName : `${animationName}.fbx`;
             let httpUrl = SETTINGS.serverUrl.replace(/^ws/, 'http');
             if(httpUrl.endsWith('/')) httpUrl = httpUrl.slice(0, -1);
-            
-            // V3 Style URL (Standard browser encoding)
             const url = `${httpUrl}/assets/animations/${filename}`;
 
             log(`Fetching: ${filename}`);
+            document.getElementById('loading').style.display = 'block';
 
             try {
                 const loader = new FBXLoader();
                 const asset = await loader.loadAsync(url);
+                document.getElementById('loading').style.display = 'none';
                 
                 // 1. Scene Analysis
                 let mixamoHips = asset.getObjectByName('mixamorig:Hips') || asset.getObjectByName('mixamorigHips');
@@ -349,6 +337,7 @@
                 return retargetedClip;
 
             } catch (e) {
+                document.getElementById('loading').style.display = 'none';
                 log(`Error: ${e.message}`, 'error');
                 return null;
             }
@@ -412,7 +401,7 @@
         // Backward compat
         const loadAndRetargetAnimation = (name, dur) => playAnimation(name, dur, false);
 
-        // --- Life System Logic --
+        // --- Life System Logic ---
         function updateLife(delta) {
             if (!currentVrm) return;
             const elapsed = clock.elapsedTime;
@@ -490,6 +479,7 @@
                 log(`Mood Update: ${JSON.stringify(data)}`);
                 if (!currentVrm) return;
                 
+                // Clear mutually exclusive emotions
                 ['happy', 'angry', 'sad', 'neutral', 'fun', 'sorrow'].forEach(e => {
                    currentVrm.expressionManager.setValue(e, 0); 
                 });
@@ -500,7 +490,7 @@
                 let idleAnim = 'Breathing Idle';
 
                 if (level < 20) { 
-                    target = 'happy'; weight = 0.6; 
+                    target = 'happy'; weight = 0.6; // Toned down from 1.0
                     idleAnim = 'Happy Idle';
                 }
                 else if (level < 40) { 
@@ -508,66 +498,42 @@
                     idleAnim = 'Breathing Idle';
                 }
                 else if (level < 80) { 
-                    target = 'neutral'; weight = 0.0; 
-                    idleAnim = 'Breathing Idle';
-                }
-                else if (level < 90) { 
-                    target = 'sad'; weight = 0.6; 
-                    idleAnim = 'Sad Idle'; 
-                }
+                    target = 'sad'; weight = 0.5; 
+                    idleAnim = 'Breathing Idle'; // Or Sad Idle if we have it
+                } 
                 else { 
-                    target = 'angry'; weight = 0.6; 
-                    idleAnim = 'Angry Idle'; 
+                    target = 'angry'; weight = 1.0; 
+                    idleAnim = 'Angry'; // 'Angry.fbx'
                 }
 
-                currentVrm.expressionManager.setValue(target, weight);
-                log(`Expression: ${target} (${weight})`);
-
+                if (target !== 'neutral') {
+                    currentVrm.expressionManager.setValue(target, weight);
+                }
+                
+                // Switch Idle Animation if different
                 if (idleAnim !== activeIdleName) {
-                    log(`Switching Idle to: ${idleAnim}`);
                     playAnimation(idleAnim, 0, true);
                 }
             });
-
-            socket.on('disconnect', () => {
-                setStatus('Disconnected');
-                log('Socket Disconnected');
-            });
         }
 
-        // --- Loop ---
+        // --- Animation Loop ---
         function animate() {
             requestAnimationFrame(animate);
             const delta = clock.getDelta();
             
             updateLife(delta);
 
-            if (currentVrm) currentVrm.update(delta); 
+            if (currentVrm) currentVrm.update(delta);
             if (mixer) mixer.update(delta);
             renderer.render(scene, camera);
         }
 
-        // --- Run ---
+        // Start
         init();
-
-        // Handle Resize
-        window.addEventListener('resize', () => {
-             camera.aspect = window.innerWidth / window.innerHeight;
-             camera.updateProjectionMatrix();
-             renderer.setSize(window.innerWidth, window.innerHeight);
-        });
-
-        // --- UI Functions ---
-        window.toggleBg = () => {
-            document.body.classList.toggle('bg-gradient');
-        };
         
-        window.rotateModel = () => {
-             if(currentVrm) {
-                 currentVrm.scene.rotation.y += Math.PI;
-             }
-        };
-
+        // Debug
+        window.play = loadAndRetargetAnimation;
     </script>
 </body>
 </html>

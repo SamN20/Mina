@@ -33,6 +33,7 @@ Mina is a context-aware AI Discord bot designed to hang out in voice channels, u
 *   **Reminders**: Natural language reminders ("Remind me to take out the trash in 10 mins" or "Remind me when I join voice").
 *   **Soundboard**: Play sound effects via voice command.
 *   **Music Control**: Integrates with external media players via Satellite.
+*   **VRM Avatar**: Full 3D VTuber-style avatar that speaks, moves, and reacts to the conversation in real-time.
 *   **Weather**: Get weather updates for any location.
 
 ---

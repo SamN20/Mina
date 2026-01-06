@@ -370,6 +370,31 @@ class SatelliteGUI:
     
     def connect(self):
         """Connect to satellite server"""
+        # Validate server URL before attempting connection
+        if not self.server_url:
+            self.log("Error: Server URL not configured", "ERROR")
+            messagebox.showerror(
+                "Configuration Error",
+                "Server URL is not configured.\n\nPlease open Settings and enter the server address."
+            )
+            return
+        
+        if not self.server_url.startswith(('ws://', 'wss://', 'http://', 'https://')):
+            self.log(f"Error: Invalid server URL format: {self.server_url}", "ERROR")
+            messagebox.showerror(
+                "Configuration Error",
+                f"Server URL must start with ws://, wss://, http://, or https://\n\nCurrent: {self.server_url}\n\nPlease open Settings and fix the server address."
+            )
+            return
+        
+        if not self.user_id or not self.token:
+            self.log("Error: User ID or token not configured", "ERROR")
+            messagebox.showerror(
+                "Configuration Error",
+                "User ID or authentication token is missing.\n\nPlease open Settings and complete the configuration."
+            )
+            return
+        
         self.log(f"Connecting to {self.server_url}...", "INFO")
         
         # Start asyncio in separate thread
@@ -397,19 +422,34 @@ class SatelliteGUI:
     def open_vrm_viewer(self):
         """Open the VRM viewer in the default browser with current credentials"""
         try:
-            vrm_path = Path(os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrm_client.html"))
+            vrm_dir = os.path.dirname(os.path.abspath(__file__))
+            vrm_path = Path(os.path.join(vrm_dir, "vrm_client.html"))
             if not vrm_path.exists():
                 self.log("VRM client file not found.", "ERROR")
                 return
 
-            query = urllib.parse.urlencode({
+            # Create config file for the client to read (bypasses URL param stripping)
+            config_path = os.path.join(vrm_dir, "vrm_config.js")
+            config_data = {
                 "server": self.server_url,
                 "token": self.token,
                 "userId": f"{self.user_id}-vrm"
-            })
+            }
+            
+            try:
+                with open(config_path, 'w') as f:
+                    f.write(f"window.VRM_CONFIG = {json.dumps(config_data)};")
+            except Exception as e:
+                self.log(f"Failed to write VRM config: {e}", "WARNING")
+
+            query = urllib.parse.urlencode(config_data)
             url = f"{vrm_path.as_uri()}?{query}"
+            
+            # Log the URL (masking token)
+            log_url = url.replace(self.token, "********") if self.token else url
+            self.log(f"Opening Mina view: {log_url}", "INFO")
+            
             webbrowser.open(url)
-            self.log("Opening Mina view in browser...", "INFO")
         except Exception as e:
             self.log(f"Failed to open Mina view: {e}", "ERROR")
 
@@ -1085,8 +1125,21 @@ $Shortcut.Save()
                 await self.sio.emit('media_info_response', {'requestId': req_id, 'info': info})
         
         try:
+            self.log(f"Attempting connection to {self.server_url}", "INFO")
             self.loop.run_until_complete(self.sio.connect(self.server_url))
             self.loop.run_until_complete(self.sio.wait())
+        except ValueError as e:
+            # Invalid URL format
+            self.root.after(0, lambda: self.log(f"Invalid server URL: {e}", "ERROR"))
+            self.root.after(0, lambda: self.update_status(False))
+            self.root.after(0, lambda: messagebox.showerror(
+                "Connection Error",
+                f"Invalid server URL format.\n\nError: {e}\n\nPlease check your server address in Settings."
+            ))
+        except ConnectionError as e:
+            # Connection refused or unreachable
+            self.root.after(0, lambda: self.log(f"Connection failed: {e}", "ERROR"))
+            self.root.after(0, lambda: self.update_status(False))
         except Exception as e:
             self.root.after(0, lambda: self.log(f"Connection error: {e}", "ERROR"))
             self.root.after(0, lambda: self.update_status(False))

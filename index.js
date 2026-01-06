@@ -18,10 +18,40 @@ require('./src/features'); // Load all features (Commands)
 
 // Satellite Server Setup
 const server = http.createServer((req, res) => {
+    // Global CORS
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    if (req.method === 'OPTIONS') {
+        res.writeHead(204);
+        res.end();
+        return;
+    }
+
+    // API: List animations
+    if (req.url.startsWith('/api/animations')) {
+        const animDir = path.join(__dirname, 'assets', 'animations');
+        fs.readdir(animDir, (err, files) => {
+            if (err) {
+                // If directory doesn't exist, return empty list
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify([]));
+                return;
+            }
+            // Filter for supported formats
+            const anims = files.filter(f => f.endsWith('.fbx') || f.endsWith('.vrma'));
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(anims));
+        });
+        return;
+    }
+
     // Serve Static Assets (e.g. VRM models)
     if (req.url.startsWith('/assets/')) {
         // Basic path sanitization
-        const safePath = path.normalize(req.url).replace(/^(\.\.[\/\\])+/, '');
+        const decodedUrl = decodeURIComponent(req.url);
+        const safePath = path.normalize(decodedUrl).replace(/^(\.\.[\/\\])+/, '');
         const filePath = path.join(__dirname, safePath);
         
         // Ensure we are still in the assets folder
@@ -38,11 +68,12 @@ const server = http.createServer((req, res) => {
                 return;
             }
             
-            // CORS headers for the web client
-            res.setHeader('Access-Control-Allow-Origin', '*');
-            
             if (filePath.endsWith('.vrm')) {
                 res.setHeader('Content-Type', 'model/gltf-binary');
+            } else if (filePath.endsWith('.fbx')) {
+                res.setHeader('Content-Type', 'application/octet-stream');
+            } else if (filePath.endsWith('.vrma')) {
+                 res.setHeader('Content-Type', 'model/gltf-binary');
             }
             
             res.writeHead(200);
