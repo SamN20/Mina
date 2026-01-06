@@ -111,6 +111,9 @@ class SatelliteGUI:
             self.setup_tray_icon()
             # Show tray notification on first run
             self.root.after(1000, self.show_tray_notification)
+        else:
+            self.log("System tray support disabled (missing dependencies)", "WARNING")
+            self.log("To fix: Run 'Install.bat' again to install pystray/pillow", "INFO")
     
     def load_config(self):
         """Load configuration from file"""

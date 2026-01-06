@@ -204,16 +204,16 @@ function Install-Dependencies {
     # Core packages (required)
     $corePackages = @(
         @{Name="python-socketio[client]"; Display="Socket.IO client"},
-        @{Name="aiohttp"; Display="Async HTTP client (required for socketio)"}
+        @{Name="aiohttp"; Display="Async HTTP client (required for socketio)"},
+        @{Name="pystray"; Display="System tray support"},
+        @{Name="pillow"; Display="Icon rendering"}
     )
     
     # Optional packages (install best effort)
     $optionalPackages = @(
         @{Name="pynput"; Display="Media control support"},
         @{Name="pyautogui"; Display="Media control fallback"},
-        @{Name="winsdk"; Display="Windows Media API"},
-        @{Name="pystray"; Display="System tray support"},
-        @{Name="pillow"; Display="Icon rendering"}
+        @{Name="winsdk"; Display="Windows Media API"}
     )
     
     Write-Host ""
