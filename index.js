@@ -14,6 +14,7 @@ const autoConversation = require('./src/features/auto_conversation');
 const gaming = require('./src/features/gaming');
 const reactions = require('./src/features/reactions');
 const analytics = require('./src/features/analytics');
+const greetings = require('./src/features/greetings'); // Fixed: Added missing import
 require('./src/features'); // Load all features (Commands)
 
 // Satellite Server Setup
@@ -53,7 +54,7 @@ const server = http.createServer((req, res) => {
         const decodedUrl = decodeURIComponent(req.url);
         const safePath = path.normalize(decodedUrl).replace(/^(\.\.[\/\\])+/, '');
         const filePath = path.join(__dirname, safePath);
-        
+
         // Ensure we are still in the assets folder
         if (!filePath.startsWith(path.join(__dirname, 'assets'))) {
             res.writeHead(403);
@@ -67,15 +68,15 @@ const server = http.createServer((req, res) => {
                 res.end('File not found');
                 return;
             }
-            
+
             if (filePath.endsWith('.vrm')) {
                 res.setHeader('Content-Type', 'model/gltf-binary');
             } else if (filePath.endsWith('.fbx')) {
                 res.setHeader('Content-Type', 'application/octet-stream');
             } else if (filePath.endsWith('.vrma')) {
-                 res.setHeader('Content-Type', 'model/gltf-binary');
+                res.setHeader('Content-Type', 'model/gltf-binary');
             }
-            
+
             res.writeHead(200);
             res.end(data);
         });
@@ -386,7 +387,7 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
             try {
                 // Join using main audio system
                 const connection = audio.join(channel);
-                
+
                 // Wait for Ready
                 await entersState(connection, VoiceConnectionStatus.Ready, 5000);
 
@@ -433,7 +434,7 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
                     actions.push({ type: 'speak', text: `By the way, you asked me to remind you: ${r.message}` });
                 }
             }
-            
+
             if (actions.length > 0) {
                 performGhostAction(newState.channel, actions);
             }
@@ -513,13 +514,13 @@ client.on(Events.MessageCreate, async message => {
     const reminderData = intentClassifier.parseReminder(text);
     if (reminderData) {
         const reminder = reminders.addReminder(userId, reminderData.message, reminderData.remindAt, 'time', message.guild.id);
-        
+
         // Schedule it immediately if possible (though scheduler usually needs a guild context)
         // The scheduler.scheduleReminder function takes (client, guildId, userId, reminder)
         // Since this is a DM, we don't have a guildId.
         // However, the scheduler iterates over guilds to find the user when the timer fires.
         // But we need to register the timeout in memory.
-        
+
         // We can try to find a mutual guild to schedule it on?
         // Or update scheduler to handle DM-set reminders?
         // The current scheduler.scheduleReminder implementation:
@@ -533,12 +534,12 @@ client.on(Events.MessageCreate, async message => {
             }, delay);
         }
         */
-        
+
         // If we don't pass a guildId, the scheduler won't know where to speak.
         // But we can iterate all guilds the bot is in, find where the user is connected?
         // For now, let's just save it. The `index.js` startup loop schedules active reminders.
         // But we need to schedule it dynamically for *now*.
-        
+
         // Let's try to find a guild the user is currently in voice for?
         let scheduled = false;
         for (const guild of client.guilds.cache.values()) {
@@ -549,7 +550,7 @@ client.on(Events.MessageCreate, async message => {
                 break; // Only schedule on one active connection
             }
         }
-        
+
         // If not in voice, we can't schedule the *voice* reminder yet.
         // But if they join later, the startup loop won't catch it unless we restart.
         // We need a global reminder watcher? 
@@ -557,7 +558,7 @@ client.on(Events.MessageCreate, async message => {
         // Actually, `scheduler.scheduleReminder` sets a timeout. When timeout fires, it checks connection.
         // So we should schedule it for *all* mutual guilds? Or just one?
         // If we schedule for all, we might get duplicate reminders if they are in multiple (rare).
-        
+
         if (!scheduled) {
             // Just pick the first mutual guild to register the timer
             for (const guild of client.guilds.cache.values()) {

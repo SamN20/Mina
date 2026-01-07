@@ -1,13 +1,13 @@
 const gemini = require('./gemini');
 const openrouter = require('./openrouter');
 
-async function generateResponse(prompt) {
+async function generateResponse(prompt, history = []) {
     const provider = (process.env.AI_PROVIDER || 'gemini').toLowerCase();
 
     if (provider === 'openrouter') {
-        return await openrouter.generateResponse(prompt);
+        return await openrouter.generateResponse(prompt, history);
     } else {
-        // Default to Gemini
+        // Default to Gemini (No history support yet, so we ignore it)
         return await gemini.generateResponse(prompt);
     }
 }

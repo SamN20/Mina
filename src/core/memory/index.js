@@ -48,10 +48,10 @@ function logToMemoryFile(header, details) {
 async function migrateLegacyMemory() {
     let changed = false;
     console.log("[Memory] Checking for legacy memories...");
-    
+
     for (const userId in memory) {
         const profile = memory[userId];
-        
+
         // Initialize new structure if missing
         if (!profile.memories) {
             profile.memories = [];
@@ -113,7 +113,7 @@ function getRelativeTime(timestamp) {
     const days = Math.floor(hours / 24);
 
     if (days > 365) return `(>1 year ago)`;
-    if (days > 30) return `(${Math.floor(days/30)} months ago)`;
+    if (days > 30) return `(${Math.floor(days / 30)} months ago)`;
     if (days > 0) return `(${days} days ago)`;
     if (hours > 0) return `(${hours} hours ago)`;
     if (minutes > 0) return `(${minutes} mins ago)`;
@@ -135,7 +135,7 @@ async function getContext(userId, discordName, text = "") {
             .sort((a, b) => b[1].timesSeen - a[1].timesSeen) // Sort by frequency
             .slice(0, 5) // Top 5
             .map(([name, stats]) => name);
-        
+
         if (games.length > 0) {
             gamingContext = `\nKnown Games: ${games.join(', ')}`;
         }
@@ -148,7 +148,7 @@ async function getContext(userId, discordName, text = "") {
     if (text && data.memories.length > 0) {
         try {
             const queryEmbedding = await vector.getEmbedding(text);
-            
+
             // Score all memories
             const scored = data.memories.map(m => {
                 if (!m.embedding) return { ...m, score: 0 };
@@ -161,7 +161,7 @@ async function getContext(userId, discordName, text = "") {
             // Filter and Sort
             // Threshold 0.25 is usually decent for MiniLM
             relevantMemories = scored
-                .filter(m => m.score > 0.25) 
+                .filter(m => m.score > 0.25)
                 .sort((a, b) => b.score - a.score)
                 .slice(0, 10); // Top 10 relevant facts
 
@@ -178,16 +178,16 @@ async function getContext(userId, discordName, text = "") {
     // 2. Recent Memories (Last 15 mins) - For conversation continuity
     const recentTimeWindow = Date.now() - 15 * 60 * 1000;
     const relevantTexts = new Set(relevantMemories.map(m => m.text));
-    
+
     // User Recent
-    const userRecent = data.memories.filter(m => 
-        m.timestamp > recentTimeWindow && 
+    const userRecent = data.memories.filter(m =>
+        m.timestamp > recentTimeWindow &&
         !relevantTexts.has(m.text)
     );
 
     // AI Recent (Self)
     const aiProfile = getProfileData("MINA_SELF");
-    const aiRecent = aiProfile.memories.filter(m => 
+    const aiRecent = aiProfile.memories.filter(m =>
         m.timestamp > recentTimeWindow
     );
 
@@ -250,8 +250,8 @@ async function getContext(userId, discordName, text = "") {
         context += `\n[Recent Conversation Context (Last 15 mins)]\n`;
         logDetails += `\n\n[Recent Context (Last 15 mins)]`;
         for (const m of recentMemories) {
-             context += `- ${m.text} ${getRelativeTime(m.timestamp)}\n`;
-             logDetails += `\n- ${m.text}`;
+            context += `- ${m.text} ${getRelativeTime(m.timestamp)}\n`;
+            logDetails += `\n- ${m.text}`;
         }
     }
 
@@ -271,7 +271,7 @@ async function getContext(userId, discordName, text = "") {
                 score: m.embedding ? vector.cosineSimilarity(queryEmbedding, m.embedding) : 0
             }));
             const aiRelevant = aiScored.filter(m => m.score > 0.25).sort((a, b) => b.score - a.score).slice(0, 3);
-            
+
             if (aiRelevant.length > 0) {
                 context += `\n[My (AI) Relevant Memories]\n- ${aiRelevant.map(m => m.text).join('\n- ')}\n`;
             }
@@ -291,7 +291,7 @@ async function getContext(userId, discordName, text = "") {
                         ...m,
                         score: m.embedding ? vector.cosineSimilarity(queryEmbedding, m.embedding) : 0
                     }));
-                    
+
                     const otherRelevant = otherScored
                         .filter(m => m.score > 0.25)
                         .sort((a, b) => b.score - a.score)
@@ -305,7 +305,7 @@ async function getContext(userId, discordName, text = "") {
                 }
             }
 
-        } catch (e) { 
+        } catch (e) {
             console.error("[Memory] Error in self/mention lookup:", e);
         }
     }
@@ -315,12 +315,12 @@ async function getContext(userId, discordName, text = "") {
 
 // --- Learning ---
 
-async function learnFromInteraction(userId, userQuery, aiResponse) {
+async function learnFromInteraction(userId, userQuery, aiResponse, history = []) {
     try {
         const profile = getProfileData(userId);
         const knownName = profile.displayName || "Unknown";
         let queryEmbedding = null;
-        try { queryEmbedding = await vector.getEmbedding(userQuery); } catch (e) {}
+        try { queryEmbedding = await vector.getEmbedding(userQuery); } catch (e) { }
 
         // --- Existing Memory Lookup ---
         let existingContext = "";
@@ -332,7 +332,7 @@ async function learnFromInteraction(userId, userQuery, aiResponse) {
                     score: m.embedding ? vector.cosineSimilarity(queryEmbedding, m.embedding) : 0
                 }));
                 const userRelevant = userScored.filter(m => m.score > 0.25).sort((a, b) => b.score - a.score).slice(0, 5);
-                
+
                 if (userRelevant.length > 0) {
                     existingContext += `\n[Existing Knowledge about User]\n- ${userRelevant.map(m => m.text).join('\n- ')}\n`;
                 }
@@ -366,7 +366,7 @@ async function learnFromInteraction(userId, userQuery, aiResponse) {
                         score: m.embedding ? vector.cosineSimilarity(queryEmbedding, m.embedding) : 0
                     }));
                     const otherRelevant = otherScored.filter(m => m.score > 0.25).sort((a, b) => b.score - a.score).slice(0, 5);
-                    
+
                     if (otherRelevant.length > 0) {
                         const formattedFacts = otherRelevant.map(m => m.text.replace(/User/g, otherName));
                         truthContext += `\n[Mentioned People (TRUTH)]\nName: ${otherName}\nFacts:\n- ${formattedFacts.join('\n- ')}\n`;
@@ -374,6 +374,9 @@ async function learnFromInteraction(userId, userQuery, aiResponse) {
                 }
             }
         } catch (e) { console.error("[Memory] Truth lookup failed:", e); }
+
+        // Format History (Last 10 lines)
+        const recentHistory = history.slice(-10).map(m => `[${m.role === 'user' ? 'User' : 'AI'}]: ${m.content}`).join('\n');
 
         const extractionPrompt = `
 Analyze the interaction between User (${knownName}) and AI (Mina).
@@ -384,6 +387,8 @@ Identify if the fact is about the User or the AI.
 ${existingContext}
 ${truthContext}
 
+[Recent Conversation]
+${recentHistory}
 User: "${userQuery}"
 AI: "${aiResponse}"
 
@@ -414,7 +419,7 @@ Output Format:
 `;
 
         let output = await ai.generateResponse(extractionPrompt);
-        
+
         // Robust JSON extraction
         const jsonStart = output.indexOf('{');
         const jsonEnd = output.lastIndexOf('}');
@@ -428,9 +433,9 @@ Output Format:
         let result;
         try {
             result = JSON.parse(output);
-        } catch (e) { 
+        } catch (e) {
             console.error("[Memory] JSON Parse Error. Raw output:", output);
-            return; 
+            return;
         }
 
         if (result) {
@@ -443,11 +448,11 @@ Output Format:
                 for (const item of result.remove) {
                     const targetId = (item.subject === 'ai') ? "MINA_SELF" : userId;
                     const targetProfile = getProfileData(targetId);
-                    
+
                     const initialLength = targetProfile.memories.length;
                     // Filter out the memory (Exact match, trimmed)
                     targetProfile.memories = targetProfile.memories.filter(m => m.text.trim() !== item.text.trim());
-                    
+
                     if (targetProfile.memories.length < initialLength) {
                         logMsg += `\nREMOVED [${targetId === "MINA_SELF" ? "AI" : "User"}]: "${item.text}"`;
                         removedTexts.add(item.text);
@@ -465,20 +470,20 @@ Output Format:
                     // Determine target profile
                     const targetId = (item.subject === 'ai') ? "MINA_SELF" : userId;
                     const targetProfile = getProfileData(targetId);
-                    
+
                     // Check for duplicates (fuzzy check?)
                     // For now, exact string check on text
                     if (!targetProfile.memories.find(m => m.text === item.text)) {
                         // Generate Embedding
                         const embedding = await vector.getEmbedding(item.text);
-                        
+
                         targetProfile.memories.push({
                             text: item.text,
                             category: item.category || 'trivia',
                             embedding: embedding,
                             timestamp: Date.now()
                         });
-                        
+
                         logMsg += `\nLEARNED [${targetId === "MINA_SELF" ? "AI" : "User"} - ${item.category}]: "${item.text}"`;
                         changed = true;
                     }

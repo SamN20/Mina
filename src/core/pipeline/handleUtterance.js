@@ -7,6 +7,7 @@ const { ActionType } = require('../types');
 const mood = require('../../features/mood');
 const vrmAnimation = require('../vrm/animation');
 const wrapped = require('../../features/wrapped/store');
+const history = require('../history');
 
 /**
  * Handle a user utterance
@@ -73,14 +74,20 @@ async function handleUtterance(text, context) {
 
     // AI Logic (Simulation of voiceHandler AI block)
     const memoryContext = await memory.getContext(context.userId, context.username, query);
-    
+
     const now = new Date();
     const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const dateString = now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
 
-    const fullPrompt = `${memoryContext}\n[Current Time: ${dateString} at ${timeString}]\n[Your Current Status: "${context.currentStatus || 'Online'}"]\nUser: ${query}`;
+    const fullPrompt = `${memoryContext}\n[Your Current Status: "${context.currentStatus || 'Online'}"]\nUser: ${query}`;
 
-    const response = await ai.generateResponse(fullPrompt);
+    // Update History (Add User Query)
+    history.add(context.userId, 'user', query, context.username);
+
+    // Get History Window
+    const historyWindow = history.get(context.userId);
+
+    const response = await ai.generateResponse(fullPrompt, historyWindow);
     console.log(`[AI] Response: "${response}"`);
 
 
@@ -89,7 +96,7 @@ async function handleUtterance(text, context) {
         try { wrapped.incrAIInteraction(context.userId, context.guildId, 1); } catch (e) { }
         // Parse status changes from response
         let spokenResponse = response;
-        
+
         // Parse Status
         const statusRegex = /\[status:\s*"?(.*?)"?\]/i;
         const statusMatch = spokenResponse.match(statusRegex);
@@ -114,32 +121,32 @@ async function handleUtterance(text, context) {
         const animRegex = /\[anim:\s*(.*?)\]/gi;
         let triggeredAnim = null;
         let match;
-        
+
         // Find all matches
         const satellite = require('../../integrations/satellite');
-        
+
         // We use a temporary string to avoid infinite loop if we were replacing in place using exec
         // But cleaner way: match all, then replace all
         const animMatches = [...spokenResponse.matchAll(animRegex)];
-        
+
         if (animMatches.length > 0) {
             animMatches.forEach((m, index) => {
                 const animName = m[1].trim();
                 console.log(`[Pipeline] AI Triggered Animation: ${animName}`);
                 triggeredAnim = animName; // Just track at least one was found
-                
+
                 // Play with slight delay between if multiple? 
                 // Currently satellite just blasts them. 
                 // Let's stagger them slightly if multiple? e.g. 2s apart
                 setTimeout(() => {
-                     if (satellite && satellite.playGesture) {
+                    if (satellite && satellite.playGesture) {
                         satellite.playGesture(null, animName);
                     } else if (satellite && satellite.broadcast) {
                         satellite.broadcast('gesture', { type: animName, duration: 4.0 });
                     }
                 }, index * 2500);
             });
-            
+
             // Remove tags from speech
             spokenResponse = spokenResponse.replace(animRegex, '').trim();
         }
@@ -164,7 +171,11 @@ async function handleUtterance(text, context) {
         }
 
         // Memory learn
-        memory.learnFromInteraction(context.userId, query, spokenResponse);
+        const historyForLearning = history.get(context.userId);
+        memory.learnFromInteraction(context.userId, query, spokenResponse, historyForLearning);
+
+        // Update History (Add AI Response)
+        history.add(context.userId, 'assistant', spokenResponse, 'Mina');
 
         return {
             [ActionType.TTS_SPEAK]: spokenResponse,
