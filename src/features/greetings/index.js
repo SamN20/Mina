@@ -134,7 +134,48 @@ Generate the spoken greeting:
     }
 }
 
+/**
+ * Generate a greeting string for a user (Non-speaking, for Ghost Mode)
+ * @param {import('discord.js').GuildMember} member 
+ * @param {import('discord.js').VoiceChannel} channel 
+ */
+async function generateGreeting(member, channel) {
+    if (!member) return null;
+    const userId = member.id;
+
+    if (storage.isOptedOut(userId)) return null;
+
+    try {
+        const profile = memory.getProfileData(userId);
+        const name = profile.displayName || member.displayName;
+        const facts = (profile.memories || [])
+            .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+            .slice(0, 3)
+            .map(m => m.text)
+            .join(', ');
+
+        const prompt = `
+A user named "${name}" joined "${channel.name}".
+User Facts: ${facts}
+
+[Instructions]
+- Briefly say hello.
+- Keep it under 2 sentences.
+- Mention "transcription is active" lightly.
+
+Generate greeting:
+`;
+        const greeting = await ai.generateResponse(prompt);
+        return greeting || `Hello ${name}, recording is active.`;
+
+    } catch (e) {
+        console.error("Generate greeting failed:", e);
+        return `Hello ${member.displayName}, recording is active.`;
+    }
+}
+
 module.exports = {
     greetNewUser,
-    greetGroupOnJoin
+    greetGroupOnJoin,
+    generateGreeting
 };

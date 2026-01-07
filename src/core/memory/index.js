@@ -387,8 +387,10 @@ Identify if the fact is about the User or the AI.
 ${existingContext}
 ${truthContext}
 
-[Recent Conversation]
+[Recent Conversation] (CONTEXT ONLY - DO NOT EXTRACT FACTS FROM HERE)
 ${recentHistory}
+
+[Current Interaction] (EXTRACT FACTS FROM HERE)
 User: "${userQuery}"
 AI: "${aiResponse}"
 
@@ -402,8 +404,10 @@ Instructions:
    - Example: User asks "What does Sam like?", AI answers "Sam likes apples". Result: NO FACT EXTRACTED.
    - **EXCEPTION**: Only extract if it defines a direct relationship to the User (e.g. "Sam is my friend", "I hate Sam").
 5. Do NOT extract questions or temporary states (e.g. "I am hungry").
-6. **REMOVAL**: If the User explicitly asks to forget something, or if a new fact contradicts an old memory (visible in Context), add the *exact text* of the old memory to the 'remove' list.
-7. Output strictly valid JSON.
+6. **NO DUPLICATES**: Do NOT extract facts that are already listed in [Existing Knowledge] unless they have fundamentally changed (e.g. "I love cats" -> "I hate cats").
+7. **SCOPE**: Only extract facts from the **Current Interaction** (last 2 lines). Use [Recent Conversation] ONLY for context (e.g. to resolve pronouns like "he", "it"). DO NOT extract facts from [Recent Conversation] that happened earlier.
+8. **REMOVAL**: If the User explicitly asks to forget something, or if a new fact contradicts an old memory (visible in Context), add the *exact text* of the old memory to the 'remove' list.
+9. Output strictly valid JSON.
 
 Output Format:
 {
@@ -471,22 +475,46 @@ Output Format:
                     const targetId = (item.subject === 'ai') ? "MINA_SELF" : userId;
                     const targetProfile = getProfileData(targetId);
 
-                    // Check for duplicates (fuzzy check?)
-                    // For now, exact string check on text
-                    if (!targetProfile.memories.find(m => m.text === item.text)) {
-                        // Generate Embedding
-                        const embedding = await vector.getEmbedding(item.text);
+                    // Check for duplicates (Exact + Semantic)
+                    const exactMatch = targetProfile.memories.find(m => m.text === item.text);
+                    if (exactMatch) continue;
 
-                        targetProfile.memories.push({
-                            text: item.text,
-                            category: item.category || 'trivia',
-                            embedding: embedding,
-                            timestamp: Date.now()
-                        });
+                    // Generate Embedding
+                    const embedding = await vector.getEmbedding(item.text);
 
-                        logMsg += `\nLEARNED [${targetId === "MINA_SELF" ? "AI" : "User"} - ${item.category}]: "${item.text}"`;
-                        changed = true;
+                    // Normalize for Comparison (Swap specific name with "User")
+                    // This helps match "Sam is creator" with "User is creator"
+                    const normalizeForCheck = (t) => t.replace(new RegExp(knownName, 'gi'), 'User').toLowerCase();
+                    const normalizedNew = normalizeForCheck(item.text);
+
+                    // Semantic Check (Threshold 0.80)
+                    const duplicate = targetProfile.memories.find(m => {
+                        if (!m.embedding) return false;
+
+                        // 1. Check Normalized Text Similarity (Heuristic)
+                        const normalizedOld = normalizeForCheck(m.text);
+                        if (normalizedNew === normalizedOld) return true;
+
+                        // 2. Vector Similarity
+                        const sim = vector.cosineSimilarity(embedding, m.embedding);
+                        return sim > 0.80;
+                    });
+
+                    if (duplicate) {
+                        console.log(`[Memory] Rejected duplicate fact: "${item.text}" (Similar to: "${duplicate.text}")`);
+                        logMsg += `\nSKIPPED [Duplicate]: "${item.text}"`;
+                        continue;
                     }
+
+                    targetProfile.memories.push({
+                        text: item.text,
+                        category: item.category || 'trivia',
+                        embedding: embedding,
+                        timestamp: Date.now()
+                    });
+
+                    logMsg += `\nLEARNED [${targetId === "MINA_SELF" ? "AI" : "User"} - ${item.category}]: "${item.text}"`;
+                    changed = true;
                 }
             }
 

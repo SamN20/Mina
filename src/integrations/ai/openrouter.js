@@ -73,7 +73,10 @@ async function generateResponse(prompt, history = []) {
     }
 
     // Add current prompt
-    messages.push({ "role": "user", "content": prompt });
+    // Explicitly add time so it is the last thing the AI sees
+    const nowP = new Date();
+    const shortTime = nowP.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    messages.push({ "role": "user", "content": `[Current Time: ${shortTime}] ${prompt}` });
 
 
     try {
