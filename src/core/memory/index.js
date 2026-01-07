@@ -545,10 +545,70 @@ function clearProfile(userId) {
     logToMemoryFile("PROFILE CLEARED", `User ${userId} cleared their profile.`);
 }
 
+/**
+ * Search memories for a specific query
+ * @param {string} text - Query text
+ * @param {number} limit - Max results
+ * @param {string} [userId] - Optional User ID to include in search (searches User + AI)
+ */
+async function searchMemories(text, limit = 5, userId = null) {
+    if (!text) return [];
+
+    let candidates = [];
+    let logBuffer = `Query: "${text}"\nScope: ${userId ? `User(${userId}) + AI` : "AI Only"}\n`;
+
+    try {
+        const queryEmbedding = await vector.getEmbedding(text);
+        
+        // 1. Search AI Self
+        const aiData = getProfileData("MINA_SELF");
+        if (aiData.memories.length > 0) {
+            candidates.push(...aiData.memories.map(m => ({ ...m, source: 'AI' })));
+        }
+
+        // 2. Search User (if provided)
+        if (userId) {
+            const userData = getProfileData(userId);
+            if (userData.memories.length > 0) {
+                candidates.push(...userData.memories.map(m => ({ ...m, source: 'User' })));
+            }
+        }
+
+        // Score
+        const scored = candidates.map(m => {
+            if (!m.embedding) return { ...m, score: 0 };
+            return {
+                ...m,
+                score: vector.cosineSimilarity(queryEmbedding, m.embedding)
+            };
+        });
+
+        // Filter, Sort, Limit
+        const results = scored
+            .filter(m => m.score > 0.3) // Slightly higher threshold for explicit search
+            .sort((a, b) => b.score - a.score)
+            .slice(0, limit);
+
+        if (results.length > 0) {
+            logBuffer += `\nResults:\n${results.map(r => `[${r.score.toFixed(2)}] [${r.source}] ${r.text}`).join('\n')}`;
+        } else {
+            logBuffer += `\nNo relevant memories found.`;
+        }
+        
+        logToMemoryFile("CHAT SEARCH", logBuffer);
+        return results;
+
+    } catch (e) {
+        console.error("[Memory] Search failed:", e);
+        return [];
+    }
+}
+
 module.exports = {
     getProfileData,
     getContext,
     setProfile,
     clearProfile,
-    learnFromInteraction
+    learnFromInteraction,
+    searchMemories
 };

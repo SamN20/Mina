@@ -479,14 +479,38 @@ client.on(Events.MessageCreate, async message => {
         // Handle Reactions
         reactions.handleMessage(message);
 
-        // Only if message is long enough to be meaningful (lowered to 2 for testing)
-        if (message.content.length > 1) {
+        // Check for Mentions or Replies
+        const isMentioned = message.mentions.users.has(client.user.id);
+        
+        let isReply = false;
+        let replyContext = null;
+
+        if (message.reference) {
+            try {
+                const refMsg = await message.fetchReference();
+                isReply = (refMsg.author.id === client.user.id);
+                replyContext = {
+                    username: refMsg.member?.displayName || refMsg.author.username,
+                    content: refMsg.content
+                };
+            } catch (e) {
+                // message might be deleted or inaccessible
+            }
+        }
+
+        const isDirect = isMentioned || isReply;
+
+        // Only if message is long enough to be meaningful (lowered to 2 for testing) OR if directly addressed
+        if (message.content.length > 1 || isDirect) {
             autoConversation.processUtterance(message.content, {
                 guildId: message.guild.id,
                 channelId: message.channel.id,
                 username: message.member?.displayName || message.author.username,
                 type: 'text',
-                channel: message.channel
+                channel: message.channel,
+                isDirect: isDirect, // FEATURE: Direct Mention Handling
+                userId: message.author.id,
+                replyContext: replyContext // FEATURE: Reply Context
             });
         }
         return;
