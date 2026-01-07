@@ -4,6 +4,10 @@ const ai = require('../../integrations/ai');
 const audio = require('../../integrations/discord/audio');
 const satellite = require('../../integrations/satellite');
 const vrmAnimation = require('../../core/vrm/animation');
+const fs = require('fs');
+const path = require('path');
+const memory = require('../../core/memory');
+const history = require('../../core/history');
 const { ActionType } = require('../../core/types');
 
 // Configuration
@@ -24,7 +28,7 @@ const lastChimeTimes = new Map(); // key -> timestamp
  */
 async function processUtterance(text, context) {
     const { guildId, username, channelId, type, channel } = context;
-    
+
     // Check Global Settings
     if (type === 'text' && !storage.getAutoTextEnabled()) return;
     if (type === 'voice' && !storage.getAutoVoiceEnabled()) return;
@@ -39,27 +43,30 @@ async function processUtterance(text, context) {
         conversationBuffers.set(key, []);
     }
     const buffer = conversationBuffers.get(key);
-    
+
     buffer.push({
         text,
         username,
+        text,
+        username,
+        userId: context.userId, // ADDED: track userId
         time: Date.now()
     });
 
     // 2. Clean Buffer (Time & Size)
     const now = Date.now();
     const validBuffer = buffer.filter(item => now - item.time < BUFFER_TIME_WINDOW);
-    
+
     // Trim to max size
     if (validBuffer.length > BUFFER_SIZE) {
         validBuffer.splice(0, validBuffer.length - BUFFER_SIZE);
     }
-    
+
     conversationBuffers.set(key, validBuffer);
 
     // 3. Check Conditions
     const debug = storage.getDebugMode();
-    
+
     if (!debug) {
         // - Cooldown passed?
         const lastChime = lastChimeTimes.get(key) || 0;
@@ -76,19 +83,61 @@ async function processUtterance(text, context) {
 
     // 4. Ask AI
     console.log(`[AutoConvo] Checking if Mina should chime in for ${key}...`);
-    
-    const transcript = validBuffer.map(i => `${i.username}: ${i.text}`).join('\n');
-    
+
+    // Enrich Transcript (Resolve Users)
+    const transcript = await Promise.all(validBuffer.map(async (i) => {
+        let name = i.username;
+        let extraInfo = "";
+
+        if (i.userId) {
+            const profile = memory.getProfileData(i.userId);
+            if (profile.displayName) name = profile.displayName;
+        }
+        return `${name}: ${i.text}`;
+    }));
+
+    // Inject Main Persona
+    let systemInstruction = "You are a helpful assistant.";
+    try {
+        const configPath = path.join(__dirname, '../../../ai_config.txt');
+        if (fs.existsSync(configPath)) {
+            systemInstruction = fs.readFileSync(configPath, 'utf8');
+        }
+        // Inject Mood
+        const currentMood = mood.getMood();
+        systemInstruction += `\n[CURRENT MOOD] Tilt: ${currentMood.level}%\n`;
+    } catch (e) { }
+
+    // Inject Contexts
+    const nowP = new Date();
+    const shortTime = nowP.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    // Recent Direct History (Last 3)
+    let directContext = "";
+    if (context.userId) {
+        const h = history.get(context.userId).slice(-3);
+        if (h.length > 0) {
+            directContext = h.map(m => `[${m.role === 'user' ? 'User' : 'You'}]: ${m.content}`).join('\n');
+        }
+    }
+
     const prompt = `
-You are hanging out in a ${type === 'text' ? 'text chat' : 'voice chat'} with friends.
-Here is the recent conversation:
-${transcript}
+${systemInstruction}
+
+[Context]
+Current Time: ${shortTime}
+${directContext ? `\n[Recent Direct Interaction with Speaker]\n(You just said this to them directly. Be consistent.)\n${directContext}\n` : ''}
+
+[Bystander Conversation]
+(You are listening to this conversation nearby)
+${transcript.join('\n')}
 
 [Instructions]
-- Decide if you want to chime in with a short, witty, or helpful comment.
-- You should ONLY speak if the conversation is interesting or if you have something valuable to add.
+- Observe the Bystander Conversation above.
+- Decide if you want to chime in with a short, witty, amusing, or helpful comment.
+- You should ONLY speak if the conversation is interesting or if you have something valuable/funny to add.
 - Do NOT interrupt if they are just coordinating game tactics or saying short phrases.
-- If you want to speak, output your response directly.
+- If you want to speak, output your response directly. 
 - If you want to stay silent, output "SILENT".
 - Keep response under 2 sentences.
 - You can perform animations by including [anim:Name] in your response.
@@ -98,7 +147,7 @@ ${debug ? '- DEBUG MODE ACTIVE: You MUST respond with something. Do not be silen
 
     try {
         const response = await ai.generateResponse(prompt);
-        
+
         if (!response || response.includes('SILENT') || response.length < 2) {
             console.log(`[AutoConvo] AI decided to stay silent.`);
             return;
@@ -106,7 +155,7 @@ ${debug ? '- DEBUG MODE ACTIVE: You MUST respond with something. Do not be silen
 
         // 5. Respond
         console.log(`[AutoConvo] Chiming in: "${response}"`);
-        
+
         let spokenResponse = response;
 
         // Parse Status
@@ -131,14 +180,14 @@ ${debug ? '- DEBUG MODE ACTIVE: You MUST respond with something. Do not be silen
         // Parse Animations (Multi-Support)
         const animRegex = /\[anim:\s*(.*?)\]/gi;
         const animMatches = [...spokenResponse.matchAll(animRegex)];
-        
+
         if (animMatches.length > 0) {
             animMatches.forEach((m, index) => {
                 const animName = m[1].trim();
                 console.log(`[AutoConvo] Triggering animation: ${animName}`);
                 setTimeout(() => {
                     if (satellite && satellite.playGesture) {
-                        satellite.playGesture(null, animName); 
+                        satellite.playGesture(null, animName);
                     } else if (satellite && satellite.broadcast) {
                         satellite.broadcast('gesture', { type: animName, duration: 4.0 });
                     }
@@ -149,12 +198,12 @@ ${debug ? '- DEBUG MODE ACTIVE: You MUST respond with something. Do not be silen
 
         // Check for Rage Quit (AutoConvo)
         if (mood.getMood().level >= 100 && type !== 'text') {
-             console.log('[AutoConvo] Tilt reached 100%. Triggering Rage Quit.');
-             audio.speak(guildId, spokenResponse);
-             setTimeout(() => {
-                 audio.leave(guildId);
-             }, 4000); // Wait for TTS to finish (approx)
-             return;
+            console.log('[AutoConvo] Tilt reached 100%. Triggering Rage Quit.');
+            audio.speak(guildId, spokenResponse);
+            setTimeout(() => {
+                audio.leave(guildId);
+            }, 4000); // Wait for TTS to finish (approx)
+            return;
         }
 
         if (type === 'text' && channel) {
@@ -167,7 +216,7 @@ ${debug ? '- DEBUG MODE ACTIVE: You MUST respond with something. Do not be silen
         } else {
             audio.speak(guildId, spokenResponse);
         }
-        
+
         lastChimeTimes.set(key, now);
 
     } catch (e) {
