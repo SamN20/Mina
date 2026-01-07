@@ -68,6 +68,22 @@ async function executePlan(plan, guildId, userId, client) {
         await audio.playFile(guildId, plan[ActionType.PLAY_FILE]);
     }
 
+    // SEQUENCE (Interleaved)
+    if (plan[ActionType.AUDIO_SEQUENCE]) {
+        const sequence = plan[ActionType.AUDIO_SEQUENCE];
+        for (const item of sequence) {
+            if (item.type === 'speak') {
+                await audio.speak(guildId, item.content);
+            } else if (item.type === 'sound') {
+                // Resolve sound path just in time (or assume content IS path? logic below assumes name)
+                const soundPath = item.path || require('../../features/soundboard/utils').getSoundPath(item.content);
+                if (soundPath) {
+                    await audio.playFile(guildId, soundPath, 0, 1.0, true);
+                }
+            }
+        }
+    }
+
     // SCHEDULING FIX
     if (plan[ActionType.REMINDER_SET]) {
         scheduler.scheduleReminder(client, guildId, userId, plan[ActionType.REMINDER_SET]);
@@ -128,7 +144,7 @@ async function joinChannel(interaction) {
 async function leaveChannel(guildId) {
     // Clean up all active transcription streams and processes for this guild
     console.log(`[Voice] Cleaning up transcriptions for guild ${guildId}`);
-    
+
     // Kill all active streams and processes
     for (const [userId, streamData] of activeStreams.entries()) {
         try {
@@ -139,7 +155,7 @@ async function leaveChannel(guildId) {
             if (streamData.opusStream && !streamData.opusStream.destroyed) {
                 streamData.opusStream.destroy();
             }
-            
+
             // Kill Python process
             if (streamData.pythonProcess && !streamData.pythonProcess.killed) {
                 streamData.pythonProcess.kill('SIGKILL');
@@ -148,14 +164,14 @@ async function leaveChannel(guildId) {
             console.error(`[Voice] Error cleaning up streams for ${userId}:`, e);
         }
     }
-    
+
     // Clear tracking
     activeStreams.clear();
     activeTranscriptions.clear();
-    
+
     // Use transcription module's cleanup as well
     transcription.killAllProcesses();
-    
+
     return audio.leave(guildId);
 }
 
@@ -180,7 +196,7 @@ function startListening(connection, guild) {
         // Cleanup helper - DON'T kill the Python process, let it finish naturally
         const cleanup = () => {
             activeTranscriptions.delete(userId);
-            
+
             // Just remove from tracking - Python process will exit naturally when stdin closes
             activeStreams.delete(userId);
 
@@ -194,7 +210,7 @@ function startListening(connection, guild) {
         // Only cleanup streams on error, not on normal end
         opusStream.on('error', (err) => {
             console.error(`[OpusStream Error] ${userId}:`, err);
-            
+
             // Kill process on error
             if (activeStreams.has(userId)) {
                 const { pythonProcess } = activeStreams.get(userId);
@@ -213,7 +229,7 @@ function startListening(connection, guild) {
             }
 
             console.error(`[PCMStream Error] ${userId}:`, err);
-            
+
             // Kill process on error
             if (activeStreams.has(userId)) {
                 const { pythonProcess } = activeStreams.get(userId);
@@ -223,7 +239,7 @@ function startListening(connection, guild) {
             }
             cleanup();
         });
-        
+
         // On normal end, just cleanup streams and let Python finish
         pcmStream.on('close', () => cleanup());
         pcmStream.on('end', () => cleanup());

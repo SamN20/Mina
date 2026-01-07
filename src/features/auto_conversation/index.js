@@ -9,6 +9,7 @@ const path = require('path');
 const memory = require('../../core/memory');
 const history = require('../../core/history');
 const { ActionType } = require('../../core/types');
+const soundboard = require('../soundboard/utils');
 
 // Configuration
 const BUFFER_SIZE = 15; // Keep last 15 lines
@@ -142,6 +143,7 @@ ${transcript.join('\n')}
 - Keep response under 2 sentences.
 - You can perform animations by including [anim:Name] in your response.
 - Available animations: ${vrmAnimation.getAvailableAnimations()}.
+${soundboard.getPromptSupplement()}
 ${debug ? '- DEBUG MODE ACTIVE: You MUST respond with something. Do not be silent.' : ''}
 `;
 
@@ -196,9 +198,26 @@ ${debug ? '- DEBUG MODE ACTIVE: You MUST respond with something. Do not be silen
             spokenResponse = spokenResponse.replace(animRegex, '').trim();
         }
 
+        // Parse Soundboard mixed with text
+        // (We strip [sound:xxx] from text for 'spokenResponse', but for 'voice', we play sequence)
+
+        let sequence = [];
+
+        if (type === 'text') {
+            // For text, we just strip the sound tags but maybe mention them?
+            // Or just strip them.
+            spokenResponse = spokenResponse.replace(/\[sound:\s*(.*?)\]/gi, '').trim();
+        } else {
+            // For voice, calculate sequence
+            sequence = soundboard.parseMixedAudio(spokenResponse);
+            // spokenResponse for text channel fallback (stripped)
+            spokenResponse = spokenResponse.replace(/\[sound:\s*(.*?)\]/gi, '').trim();
+        }
+
         // Check for Rage Quit (AutoConvo)
         if (mood.getMood().level >= 100 && type !== 'text') {
             console.log('[AutoConvo] Tilt reached 100%. Triggering Rage Quit.');
+            // Just speak the stripped text then leave
             audio.speak(guildId, spokenResponse);
             setTimeout(() => {
                 audio.leave(guildId);
@@ -214,7 +233,22 @@ ${debug ? '- DEBUG MODE ACTIVE: You MUST respond with something. Do not be silen
                 channel.send(spokenResponse);
             }, 2000);
         } else {
-            audio.speak(guildId, spokenResponse);
+            // Voice Buffer (Sequence Execution)
+            if (sequence.length > 0) {
+                for (const item of sequence) {
+                    if (item.type === 'speak') {
+                        await audio.speak(guildId, item.content);
+                    } else if (item.type === 'sound') {
+                        const soundPath = soundboard.getSoundPath(item.content);
+                        if (soundPath) {
+                            console.log(`[AutoConvo] Playing sound: ${item.content}`);
+                            await audio.playFile(guildId, soundPath, 0, 0.6, true);
+                        }
+                    }
+                }
+            } else {
+                await audio.speak(guildId, spokenResponse);
+            }
         }
 
         lastChimeTimes.set(key, now);

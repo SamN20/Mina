@@ -8,6 +8,7 @@ const mood = require('../../features/mood');
 const vrmAnimation = require('../vrm/animation');
 const wrapped = require('../../features/wrapped/store');
 const history = require('../history');
+const soundboard = require('../../features/soundboard/utils');
 
 /**
  * Handle a user utterance
@@ -79,7 +80,7 @@ async function handleUtterance(text, context) {
     const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const dateString = now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
 
-    const fullPrompt = `${memoryContext}\n[Your Current Status: "${context.currentStatus || 'Online'}"]\nUser: ${query}`;
+    const fullPrompt = `${memoryContext}\n[Your Current Status: "${context.currentStatus || 'Online'}"]\n${soundboard.getPromptSupplement()}\nUser: ${query}`;
 
     // Update History (Add User Query)
     history.add(context.userId, 'user', query, context.username);
@@ -170,18 +171,41 @@ async function handleUtterance(text, context) {
             meta.newStatus = "Rage Quit";
         }
 
-        // Memory learn
+        // Parse Soundboard mixed with text
+        // We use the sequence approach
+        const sequence = soundboard.parseMixedAudio(spokenResponse);
+
+        // Strip tags for clean text log/history
+        spokenResponse = spokenResponse.replace(/\[sound:\s*(.*?)\]/gi, '').trim();
+
+        // Memory learn (clean text)
         const historyForLearning = history.get(context.userId);
         memory.learnFromInteraction(context.userId, query, spokenResponse, historyForLearning);
 
         // Update History (Add AI Response)
         history.add(context.userId, 'assistant', spokenResponse, 'Mina');
 
-        return {
-            [ActionType.TTS_SPEAK]: spokenResponse,
-            [ActionType.LEAVE]: shouldLeave,
-            metadata: meta
-        };
+        // Construct plan
+        // Use AUDIO_SEQUENCE if we have multiple parts or just one sound part
+        // If just simple text, use TTS_SPEAK for backward compat (or just sequence)
+
+        // If sequence has > 1 item OR contains a sound, use sequence.
+        // Otherwise just TTS.
+        let hasSound = sequence.some(s => s.type === 'sound');
+
+        if (hasSound || sequence.length > 1) {
+            return {
+                [ActionType.AUDIO_SEQUENCE]: sequence,
+                [ActionType.LEAVE]: shouldLeave,
+                metadata: meta
+            };
+        } else {
+            return {
+                [ActionType.TTS_SPEAK]: spokenResponse,
+                [ActionType.LEAVE]: shouldLeave,
+                metadata: meta
+            };
+        }
     }
 
     return {};
