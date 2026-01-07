@@ -32,7 +32,7 @@ function addReminder(userId, message, remindAt, type = 'time', guildId = null) {
     const reminder = {
         id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
         userId,
-        message,
+        message: String(message),
         remindAt, // Can be null if type is 'on_join'
         type, // 'time' or 'on_join'
         createdAt: new Date().toISOString()

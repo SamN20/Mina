@@ -419,14 +419,14 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
             if (joinSound) {
                 actions.push({ type: 'file', path: joinSound });
             }
-            // Greet
-            const member = newState.member;
-            if (member) {
-                const greeting = greetings.generateGreeting(member, newState.channel);
-                if (greeting) {
-                    actions.push({ type: 'speak', text: greeting });
-                }
-            }
+            // // Greet NOTE: Bot should not greet in ghost mode to avoid confusion
+            // const member = newState.member;
+            // if (member) {
+            //     const greeting = greetings.generateGreeting(member, newState.channel);
+            //     if (greeting) {
+            //         actions.push({ type: 'speak', text: greeting });
+            //     }
+            // }
             // Reminders
             const pendingReminders = reminders.getAndRemoveTriggeredReminders(userId, 'on_join', newState.guild.id);
             if (pendingReminders.length > 0) {

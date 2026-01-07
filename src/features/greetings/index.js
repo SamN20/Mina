@@ -57,7 +57,7 @@ Generate the spoken greeting:
         const greeting = await ai.generateResponse(prompt);
         if (greeting) {
             console.log(`[User Join Greeting] "${greeting}"`);
-            audio.speak(guildId, greeting);
+            audio.speak(guildId, String(greeting));
         } else {
             audio.speak(guildId, `Hello ${name}, voice transcription is active.`);
         }
@@ -123,7 +123,7 @@ Generate the spoken greeting:
         const greeting = await ai.generateResponse(prompt);
         if (greeting) {
             console.log(`[Join Greeting] "${greeting}"`);
-            audio.speak(channel.guild.id, greeting);
+            audio.speak(channel.guild.id, String(greeting));
         } else {
             audio.speak(channel.guild.id, "Hello everyone! Voice transcription is now active.");
         }
@@ -166,7 +166,7 @@ User Facts: ${facts}
 Generate greeting:
 `;
         const greeting = await ai.generateResponse(prompt);
-        return greeting || `Hello ${name}, recording is active.`;
+        return String(greeting || `Hello ${name}, recording is active.`);
 
     } catch (e) {
         console.error("Generate greeting failed:", e);

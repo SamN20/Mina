@@ -72,7 +72,9 @@ async function processUtterance(text, context) {
     // Determine Cooldown
     const lastChime = lastChimeTimes.get(key) || 0;
     const hotUntil = hotThreads.get(key) || 0;
-    const isHot = now < hotUntil;
+    
+    // Voice Logic: Disable "Hot Thread" mode to prevent constant replies in voice (too intrusive)
+    const isHot = (type !== 'voice') && (now < hotUntil);
     const applicableCooldown = isHot ? HOT_THREAD_COOLDOWN : CHIME_COOLDOWN;
     
     

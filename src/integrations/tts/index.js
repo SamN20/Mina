@@ -13,6 +13,9 @@ const engines = {
 };
 
 async function generateSpeech(text, options = {}) {
+    // Ensure text is a string
+    text = String(text || '');
+
     // 1. Determine engine
     let engineName = process.env.TTS_ENGINE || 'gtts';
     engineName = engineName.toLowerCase();
