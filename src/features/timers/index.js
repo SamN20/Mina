@@ -13,7 +13,7 @@ registry.register({
         const data = intentClassifier.parseTimer(text);
 
         // Add timer as reminder
-        const reminder = reminders.addReminder(context.userId, "Timer is up!", data.remindAt);
+        const reminder = reminders.addReminder(context.userId, "Timer is up!", data.remindAt, 'time', context.guildId);
 
         // Calculate duration string for confirmation
         const remindTime = new Date(data.remindAt);

@@ -19,6 +19,25 @@ try {
     console.error('[Analytics] Failed to load data:', e);
 }
 
+// Migrate legacy heatmap shape -> per-year buckets if needed
+function migrateLegacyData() {
+    const year = new Date().getFullYear().toString();
+    for (const userId of Object.keys(activityData)) {
+        const entry = activityData[userId];
+        // If entry has top-level heatmap (legacy), move it under years[currentYear]
+        if (entry && entry.heatmap && !entry.years) {
+            const heat = entry.heatmap;
+            delete entry.heatmap;
+            entry.years = {};
+            entry.years[year] = { heatmap: heat };
+        }
+        // Ensure structure exists
+        if (!entry.years) entry.years = {};
+    }
+}
+
+migrateLegacyData();
+
 function saveActivity() {
     try {
         fs.writeFileSync(ACTIVITY_FILE, JSON.stringify(activityData, null, 2));
@@ -34,23 +53,32 @@ function saveSocial() {
 // --- Activity Heatmap ---
 
 function updateActivity(userId, type, amount = 1) {
-    if (!activityData[userId]) {
-        activityData[userId] = { heatmap: {} };
-    }
-
     const now = new Date();
+    const year = now.getFullYear().toString();
     const day = now.getDay(); // 0-6
     const hour = now.getHours(); // 0-23
 
-    if (!activityData[userId].heatmap[day]) activityData[userId].heatmap[day] = {};
-    if (!activityData[userId].heatmap[day][hour]) {
-        activityData[userId].heatmap[day][hour] = { voice: 0, msg: 0, online: 0 };
+    if (!activityData[userId]) activityData[userId] = { years: {} };
+
+    // If legacy heatmap still present, migrate it into current year
+    if (activityData[userId].heatmap && !activityData[userId].years) {
+        const legacy = activityData[userId].heatmap;
+        activityData[userId].years = {};
+        activityData[userId].years[year] = { heatmap: legacy };
+        delete activityData[userId].heatmap;
     }
 
-    if (type === 'voice') activityData[userId].heatmap[day][hour].voice += amount;
-    if (type === 'msg') activityData[userId].heatmap[day][hour].msg += amount;
-    if (type === 'online') activityData[userId].heatmap[day][hour].online += amount;
-    
+    if (!activityData[userId].years) activityData[userId].years = {};
+    if (!activityData[userId].years[year]) activityData[userId].years[year] = { heatmap: {} };
+
+    const heatmap = activityData[userId].years[year].heatmap;
+    if (!heatmap[day]) heatmap[day] = {};
+    if (!heatmap[day][hour]) heatmap[day][hour] = { voice: 0, msg: 0, online: 0 };
+
+    if (type === 'voice') heatmap[day][hour].voice += amount;
+    if (type === 'msg') heatmap[day][hour].msg += amount;
+    if (type === 'online') heatmap[day][hour].online += amount;
+
     // Removed auto-save for performance
 }
 

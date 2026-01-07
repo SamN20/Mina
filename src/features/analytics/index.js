@@ -1,4 +1,6 @@
 const store = require('./store');
+const coreStorage = require('../../core/storage');
+const wrapped = require('../wrapped/store');
 
 const SCAN_INTERVAL = 60 * 1000; // 1 minute
 
@@ -11,7 +13,10 @@ function init(client) {
 
 function trackMessage(message) {
     if (message.author.bot) return;
+    if (coreStorage.isOptedOut(message.author.id)) return;
     store.updateActivity(message.author.id, 'msg', 1);
+    // Wrapped: increment per-user/server/channel message counters
+    try { wrapped.incrMessage(message.author.id, message.guild ? message.guild.id : null, message.channel.id, 1); } catch (e) { }
     // We can save immediately for messages since they are sporadic
     store.saveAll();
 }
@@ -30,6 +35,8 @@ async function scanActivity(client) {
             if (member.user.bot) continue;
 
             const userId = member.id;
+
+            if (coreStorage.isOptedOut(userId)) continue; // Skip opted-out users
 
             // Track Status (Online/Idle/DnD)
             // Note: member.presence might be null if offline or not cached

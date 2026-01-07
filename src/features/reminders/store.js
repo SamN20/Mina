@@ -28,7 +28,7 @@ function saveReminders() {
 }
 
 // Add a new reminder
-function addReminder(userId, message, remindAt, type = 'time') {
+function addReminder(userId, message, remindAt, type = 'time', guildId = null) {
     const reminder = {
         id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
         userId,
@@ -39,15 +39,28 @@ function addReminder(userId, message, remindAt, type = 'time') {
     };
     reminders.push(reminder);
     saveReminders();
+
+    // Track in wrapped
+    try {
+        const wrapped = require('../wrapped/store');
+        wrapped.incrReminderSet(userId, guildId);
+    } catch (e) { }
+
     return reminder;
 }
 
 // Get reminders triggered by an event (and remove them!)
-function getAndRemoveTriggeredReminders(userId, type) {
+function getAndRemoveTriggeredReminders(userId, type, guildId = null) {
     const triggered = reminders.filter(r => r.userId === userId && r.type === type);
     if (triggered.length > 0) {
         reminders = reminders.filter(r => !(r.userId === userId && r.type === type));
         saveReminders();
+
+        // Track in wrapped
+        try {
+            const wrapped = require('../wrapped/store');
+            wrapped.incrReminderCompleted(userId, guildId, triggered.length);
+        } catch (e) { }
     }
     return triggered;
 }

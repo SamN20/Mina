@@ -11,7 +11,7 @@ function getTodayString() {
     return new Date().toISOString().split('T')[0];
 }
 
-function saveTranscript(username, userId, text) {
+function saveTranscript(username, userId, text, guildId = null) {
     const dateStr = getTodayString();
     // Structure: transcripts/YYYY-MM-DD/username-userId.txt
     const dayDir = path.join(BASE_DIR, dateStr);
@@ -25,12 +25,18 @@ function saveTranscript(username, userId, text) {
     const filename = `${safeUsername}-${userId}.txt`;
     const filePath = path.join(dayDir, filename);
 
-    const timestamp = new Date().toLocaleTimeString();
+    const timestamp = new Date().toISOString(); // ISO for year precision
     const line = `[${timestamp}] ${text}\n`;
 
     fs.appendFile(filePath, line, (err) => {
         if (err) console.error('Error writing transcript:', err);
     });
+
+    // Record words for wrapped
+    try {
+        const wrapped = require('../features/wrapped/store');
+        wrapped.recordWords(text, userId === 'BOT_TTS' ? null : userId, guildId);
+    } catch (e) { }
 }
 
 function getTranscriptPath(userId) {
@@ -59,7 +65,7 @@ function logEvent(username, userId, eventType) {
     const filename = `${safeUsername}-${userId}.txt`;
     const filePath = path.join(dayDir, filename);
 
-    const timestamp = new Date().toLocaleTimeString();
+    const timestamp = new Date().toISOString();
     const logLine = `[${timestamp}] *** ${eventType} ***\n`;
 
     fs.appendFile(filePath, logLine, (err) => {

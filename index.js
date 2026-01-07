@@ -105,6 +105,8 @@ try {
     process.exit(1);
 }
 
+const wrapped = require('./src/features/wrapped/store');
+
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -174,6 +176,8 @@ client.on(Events.InteractionCreate, async interaction => {
         if (!command) return;
 
         try {
+            // Wrapped: record command usage (user + server)
+            try { wrapped.incrCommand(interaction.user.id, interaction.guildId, interaction.commandName, 1); } catch (e) { }
             // Special handling for join/leave to use our voiceHandler
             if (interaction.commandName === 'join') {
                 await voiceHandler.joinChannel(interaction);
@@ -299,6 +303,9 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
         storage.logEvent(username, userId, logText);
         console.log(`[Event] ${username} joined.`);
 
+        // Wrapped: start voice session
+        try { wrapped.startVoiceSession(userId, guildId, newState.channelId); } catch (e) { }
+
 
         if (newState.member.user.bot) {
             console.log(`[Event] ${username} is a bot, skipping.`);
@@ -328,7 +335,7 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
             await voiceHandler.greetNewUser(newState.guild.id, userId, newState.member);
 
             // 4. Play Reminders (Queued)
-            const pendingReminders = reminders.getAndRemoveTriggeredReminders(userId, 'on_join');
+            const pendingReminders = reminders.getAndRemoveTriggeredReminders(userId, 'on_join', newState.guild.id);
             if (pendingReminders.length > 0) {
                 console.log(`[Reminders] Found ${pendingReminders.length} on-join reminders for ${username}`);
                 for (const r of pendingReminders) {
@@ -345,6 +352,9 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
         const logText = `${username} left the channel.`;
         storage.logEvent(username, userId, logText);
         console.log(`[Event] ${username} left.`);
+
+        // Wrapped: end voice session and record duration
+        try { wrapped.endVoiceSession(userId); } catch (e) { }
 
         // Play Leave Sound
         const leaveSound = storage.getLeaveSound(userId);
@@ -402,17 +412,29 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
 
         // Ghost JOIN
         if (newState.channelId) {
+            const actions = [];
+            // Play join sound if any
             const joinSound = storage.getJoinSound(userId);
-            const pendingReminders = reminders.getAndRemoveTriggeredReminders(userId, 'on_join');
-            
-            if (joinSound || pendingReminders.length > 0) {
-                const actions = [];
-                if (joinSound) actions.push({ type: 'file', path: joinSound });
-                
+            if (joinSound) {
+                actions.push({ type: 'file', path: joinSound });
+            }
+            // Greet
+            const member = newState.member;
+            if (member) {
+                const greeting = greetings.generateGreeting(member, newState.channel);
+                if (greeting) {
+                    actions.push({ type: 'speak', text: greeting });
+                }
+            }
+            // Reminders
+            const pendingReminders = reminders.getAndRemoveTriggeredReminders(userId, 'on_join', newState.guild.id);
+            if (pendingReminders.length > 0) {
                 for (const r of pendingReminders) {
                     actions.push({ type: 'speak', text: `By the way, you asked me to remind you: ${r.message}` });
                 }
-                
+            }
+            
+            if (actions.length > 0) {
                 performGhostAction(newState.channel, actions);
             }
         }
@@ -423,6 +445,19 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
                 performGhostAction(oldState.channel, [{ type: 'file', path: leaveSound }]);
             }
         }
+    }
+});
+
+// Event: Voice State Update (Join/Leave Logging & Theme Songs)
+
+// Event: Message Reaction Add (Track reactions)
+client.on(Events.MessageReactionAdd, async (reaction, user) => {
+    try {
+        if (user.bot) return;
+        if (storage.isOptedOut(user.id)) return;
+        wrapped.incrReaction(user.id, reaction.message.guildId, 1);
+    } catch (e) {
+        console.error('[Wrapped] Error tracking reaction:', e);
     }
 });
 
@@ -469,7 +504,7 @@ client.on(Events.MessageCreate, async message => {
         const match = text.match(/remind me (?:next time|when) I join (?:to |that )?(.*)/i);
         if (match) {
             const reminderText = match[1];
-            reminders.addReminder(userId, reminderText, null, 'on_join');
+            reminders.addReminder(userId, reminderText, null, 'on_join', message.guild.id);
             return message.reply(`Okay, I'll remind you "${reminderText}" the next time you join a voice channel I'm in.`);
         }
     }
@@ -477,7 +512,7 @@ client.on(Events.MessageCreate, async message => {
     // 2. Check for Time-based Reminder
     const reminderData = intentClassifier.parseReminder(text);
     if (reminderData) {
-        const reminder = reminders.addReminder(userId, reminderData.message, reminderData.remindAt, 'time');
+        const reminder = reminders.addReminder(userId, reminderData.message, reminderData.remindAt, 'time', message.guild.id);
         
         // Schedule it immediately if possible (though scheduler usually needs a guild context)
         // The scheduler.scheduleReminder function takes (client, guildId, userId, reminder)

@@ -239,7 +239,7 @@ function startListening(connection, guild) {
 
         const pythonProcess = transcription.transcribeStream(pcmStream, userId, async (uid, text) => {
             // Save Transcript (Restored)
-            storage.saveTranscript(username, uid, text);
+            storage.saveTranscript(username, uid, text, guild.id);
 
             // 1. Handle Pipeline
             const context = {

@@ -11,6 +11,7 @@ const fs = require('fs');
 const tts = require('../tts');
 const satellite = require('../satellite');
 const storage = require('../../core/storage');
+const wrapped = require('../../features/wrapped/store');
 
 // State Maps
 const connections = new Map(); // GuildId -> Connection
@@ -167,6 +168,8 @@ async function speak(guildId, text, args = {}) {
     options.code = effectiveCode;
 
     try {
+        // Log TTS usage (per-server)
+        try { wrapped.incrTTS(guildId, null, 1); } catch (e) { }
         const tempFile = await tts.generateSpeech(text, options);
         if (!tempFile || !fs.existsSync(tempFile)) {
             console.error("TTS failed to generate file.");
@@ -175,7 +178,7 @@ async function speak(guildId, text, args = {}) {
 
         // Log
         const styleLog = options.style ? `[${options.style}] ` : '';
-        storage.saveTranscript("Mina 🤖", "BOT_TTS", `${styleLog}${text}`);
+        storage.saveTranscript("Mina 🤖", "BOT_TTS", `${styleLog}${text}`, guildId);
 
         tempFiles.push(tempFile);
 

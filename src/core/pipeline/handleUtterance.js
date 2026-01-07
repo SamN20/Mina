@@ -6,6 +6,7 @@ const memory = require('../memory');
 const { ActionType } = require('../types');
 const mood = require('../../features/mood');
 const vrmAnimation = require('../vrm/animation');
+const wrapped = require('../../features/wrapped/store');
 
 /**
  * Handle a user utterance
@@ -84,6 +85,8 @@ async function handleUtterance(text, context) {
 
 
     if (response) {
+        // Wrapped: increment AI interaction
+        try { wrapped.incrAIInteraction(context.userId, context.guildId, 1); } catch (e) { }
         // Parse status changes from response
         let spokenResponse = response;
         

@@ -19,7 +19,7 @@ registry.register({
         // For safety, let's keep the side-effect here (adding reminder) 
         // and return the confirmation speech.
 
-        const reminder = reminders.addReminder(context.userId, data.message, data.remindAt);
+        const reminder = reminders.addReminder(context.userId, data.message, data.remindAt, 'time', context.guildId);
 
         // We need to calculate the confirmation message similar to original
         const diffMs = new Date(data.remindAt) - Date.now();

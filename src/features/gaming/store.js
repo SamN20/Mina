@@ -1,5 +1,7 @@
 const fs = require('fs');
 const path = require('path');
+const storage = require('../../core/storage');
+const wrapped = require('../wrapped/store');
 
 const GAMES_FILE = path.join(process.cwd(), 'data', 'games.json');
 
@@ -58,6 +60,11 @@ function recordGameActivity(userId, username, gameName) {
     };
 
     saveData();
+
+    // Wrapped: record game play
+    if (!storage.isOptedOut(userId)) {
+        try { wrapped.recordGame(userId, gameName); } catch (e) { }
+    }
 }
 
 function getUserStats(userId) {
