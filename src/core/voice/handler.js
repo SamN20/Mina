@@ -51,6 +51,28 @@ module.exports = {
 async function executePlan(plan, guildId, userId, client) {
     if (!plan) return;
 
+    // DM EXECUTION (Moved to top for immediate sending)
+    if (plan[ActionType.SEND_DM]) {
+        const { userId, message } = plan[ActionType.SEND_DM];
+        // Fire and forget (Async)
+        (async () => {
+            try {
+                console.log(`[Voice] Sending DM to ${userId}: "${message}"`);
+                const user = await client.users.fetch(userId);
+                if (user) {
+                    await user.send(message);
+                    storage.logEvent(user.username, userId, `AI sent DM: "${message}"`);
+                } else {
+                    console.warn(`[Voice] Failed to fetch user ${userId} for DM.`);
+                    storage.logEvent("Unknown", userId, `Failed to send DM (User not found): "${message}"`);
+                }
+            } catch (e) {
+                console.error(`[Voice] Failed to send DM to ${userId}:`, e);
+                storage.logEvent("Unknown", userId, `Failed to send DM (Error): "${message}" - ${e.message}`);
+            }
+        })();
+    }
+
     // Play success sound (queued)
     const successSound = path.join(process.cwd(), 'data', 'sounds', 'success.mp3');
     if (fs.existsSync(successSound)) {
@@ -95,6 +117,8 @@ async function executePlan(plan, guildId, userId, client) {
     if (plan[ActionType.LEAVE]) {
         audio.leave(guildId);
     }
+
+
 
     // STATUS UPDATE FIX
     if (plan.metadata && plan.metadata.newStatus) {

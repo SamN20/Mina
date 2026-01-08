@@ -28,6 +28,7 @@ async function generateResponse(prompt, history = []) {
         systemInstruction += `\n\n[CURRENT STATE]\nTilt Level: ${currentMood.level}%\nMood Description: ${currentMood.description}\n`;
         systemInstruction += `\n[INSTRUCTIONS]\nAnalyze the user's message. If they are rude, annoying, or mention things you hate (like Call of Duty), INCREASE your tilt level. If they are nice, funny, or talk about tech/coding, DECREASE it.\n`;
         systemInstruction += `To change your tilt, include a tag like [tilt: +10] or [tilt: -5] in your response. This tag will be hidden from the user.\n`;
+        systemInstruction += `To send a DM to someone, use the tag [dm:Name:Message]. For example: [dm:Sam:Something is wrong!]. You can do this if you need to tell them something private or urgent. If you need help contact Sam.\n`;
         systemInstruction += `You can perform animations by including [anim:Name] in your response. Available animations: ${vrmAnimation.getAvailableAnimations()}.\n`;
 
         // Inject Time

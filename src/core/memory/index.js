@@ -551,6 +551,41 @@ function clearProfile(userId) {
  * @param {number} limit - Max results
  * @param {string} [userId] - Optional User ID to include in search (searches User + AI)
  */
+/**
+ * Find a user by name (fuzzy match)
+ * @param {string} name 
+ * @returns {{id: string, name: string}|null}
+ */
+function findUserByName(name) {
+    if (!name) return null;
+    const lowerName = name.toLowerCase();
+
+    // 1. Exact ID match
+    if (memory[name]) return { id: name, name: memory[name].displayName || name };
+
+    // 2. Exact Name match (case-insensitive)
+    for (const userId in memory) {
+        if (userId === 'MINA_SELF') continue;
+        const profile = memory[userId];
+        if (profile.displayName && profile.displayName.toLowerCase() === lowerName) {
+            return { id: userId, name: profile.displayName };
+        }
+    }
+
+    // 3. Partial match (if > 3 chars)
+    if (lowerName.length > 3) {
+        for (const userId in memory) {
+            if (userId === 'MINA_SELF') continue;
+            const profile = memory[userId];
+            if (profile.displayName && profile.displayName.toLowerCase().includes(lowerName)) {
+                return { id: userId, name: profile.displayName };
+            }
+        }
+    }
+
+    return null;
+}
+
 async function searchMemories(text, limit = 5, userId = null) {
     if (!text) return [];
 
@@ -559,7 +594,7 @@ async function searchMemories(text, limit = 5, userId = null) {
 
     try {
         const queryEmbedding = await vector.getEmbedding(text);
-        
+
         // 1. Search AI Self
         const aiData = getProfileData("MINA_SELF");
         if (aiData.memories.length > 0) {
@@ -594,7 +629,7 @@ async function searchMemories(text, limit = 5, userId = null) {
         } else {
             logBuffer += `\nNo relevant memories found.`;
         }
-        
+
         logToMemoryFile("CHAT SEARCH", logBuffer);
         return results;
 
@@ -610,5 +645,6 @@ module.exports = {
     setProfile,
     clearProfile,
     learnFromInteraction,
-    searchMemories
+    searchMemories,
+    findUserByName
 };

@@ -41,6 +41,7 @@ async function generateResponse(prompt) {
 [Instructions]
 - Keep it short and casual, under 2 sentences.
 - You can perform animations by including [anim:Name] in your response.
+- To send a DM, use [dm:Name:Message]. Example: [dm:Sam:Help me!].
 - Available animations: ${vrmAnimation.getAvailableAnimations()}.
 
 User: ${prompt}

@@ -27,7 +27,8 @@ const ActionType = {
     REMINDER_SET: 'REMINDER_SET',
     TIMER_SET: 'TIMER_SET',
     LEAVE: 'LEAVE',
-    AUDIO_SEQUENCE: 'AUDIO_SEQUENCE'
+    AUDIO_SEQUENCE: 'AUDIO_SEQUENCE',
+    SEND_DM: 'SEND_DM'
 };
 
 const IntentType = {

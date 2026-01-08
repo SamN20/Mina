@@ -176,7 +176,58 @@ async function handleUtterance(text, context) {
         const sequence = soundboard.parseMixedAudio(spokenResponse);
 
         // Strip tags for clean text log/history
+        const originalResponse = spokenResponse;
         spokenResponse = spokenResponse.replace(/\[sound:\s*(.*?)\]/gi, '').trim();
+
+        // Parse DM Tags with Bracket Counting (Nested Support)
+        const dmStartMarker = "[dm:";
+        const dmStartIndex = originalResponse.toLowerCase().indexOf(dmStartMarker);
+        let dmAction = null;
+
+        if (dmStartIndex !== -1) {
+            let depth = 0;
+            let dmEndIndex = -1;
+
+            // Start scanning from the tag start
+            for (let i = dmStartIndex; i < originalResponse.length; i++) {
+                if (originalResponse[i] === '[') depth++;
+                else if (originalResponse[i] === ']') depth--;
+
+                if (depth === 0) {
+                    dmEndIndex = i;
+                    break;
+                }
+            }
+
+            if (dmEndIndex !== -1) {
+                const fullTag = originalResponse.substring(dmStartIndex, dmEndIndex + 1);
+                // Content inside [dm: ... ]
+                const content = originalResponse.substring(dmStartIndex + 4, dmEndIndex);
+
+                // Split by first colon to get Name:Message
+                const firstColon = content.indexOf(':');
+                if (firstColon !== -1) {
+                    const targetName = content.substring(0, firstColon).trim();
+                    const messageContent = content.substring(firstColon + 1).trim();
+
+                    console.log(`[Pipeline] AI wants to DM "${targetName}": "${messageContent}"`);
+
+                    const targetUser = memory.findUserByName(targetName);
+                    if (targetUser) {
+                        console.log(`[Pipeline] Resolved "${targetName}" to User ID: ${targetUser.id}`);
+                        dmAction = {
+                            userId: targetUser.id,
+                            message: messageContent
+                        };
+                    } else {
+                        console.warn(`[Pipeline] Could not find user "${targetName}" for DM.`);
+                    }
+                }
+
+                // Remove DM tag from spoken response
+                spokenResponse = spokenResponse.replace(fullTag, '').trim();
+            }
+        }
 
         // Memory learn (clean text)
         const historyForLearning = history.get(context.userId);
@@ -197,12 +248,14 @@ async function handleUtterance(text, context) {
             return {
                 [ActionType.AUDIO_SEQUENCE]: sequence,
                 [ActionType.LEAVE]: shouldLeave,
+                [ActionType.SEND_DM]: dmAction,
                 metadata: meta
             };
         } else {
             return {
                 [ActionType.TTS_SPEAK]: spokenResponse,
                 [ActionType.LEAVE]: shouldLeave,
+                [ActionType.SEND_DM]: dmAction,
                 metadata: meta
             };
         }
