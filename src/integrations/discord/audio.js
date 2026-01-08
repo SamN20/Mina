@@ -120,13 +120,13 @@ function cleanTempFiles() {
 function stopTTS(guildId, clearQueue = false) {
     const player = activePlayers.get(guildId);
     const queue = ttsQueues.get(guildId) || [];
-    
+
     if (clearQueue) {
         // Clear the queue
         ttsQueues.set(guildId, []);
         console.log(`[Audio] Cleared TTS queue for guild ${guildId}`);
     }
-    
+
     if (player) {
         // Stop current player
         player.stop();
@@ -135,7 +135,7 @@ function stopTTS(guildId, clearQueue = false) {
         console.log(`[Audio] Stopped current TTS for guild ${guildId}`);
         return true;
     }
-    
+
     return clearQueue; // Return true if we cleared queue even if no player was active
 }
 
@@ -166,6 +166,10 @@ async function speak(guildId, text, args = {}) {
 
     const effectiveCode = options.code || storage.getGlobalVoice() || 'en-US';
     options.code = effectiveCode;
+
+    // Filter out asterisks to prevent voice model glitches
+    // This removes single asterisks often used for *actions*
+    text = text.replace(/\*/g, '');
 
     try {
         // Log TTS usage (per-server)
@@ -213,7 +217,7 @@ function processQueue(guildId) {
     try {
         const resource = createAudioResource(item.tempFile, { inputType: StreamType.Arbitrary, inlineVolume: true });
         if (item.volume) resource.volume.setVolume(item.volume);
-        
+
         const player = createAudioPlayer();
         activePlayers.set(guildId, player);
 
@@ -291,10 +295,10 @@ async function playInterruption(guildId, filePath) {
     if (player && current) {
         console.log(`[Audio] Interrupting current TTS for ${guildId}`);
         isInterrupted.set(guildId, true);
-        
+
         // Put current item back at front
         queue.unshift(current);
-        
+
         // Stop player (triggers Idle -> checks isInterrupted -> processQueue)
         player.stop();
     }

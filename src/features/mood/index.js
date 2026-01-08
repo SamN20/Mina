@@ -12,7 +12,7 @@ try {
         const data = JSON.parse(fs.readFileSync(MOOD_FILE, 'utf8'));
         tiltLevel = data.tiltLevel || 0;
         lastUpdate = data.lastUpdate || Date.now();
-        
+
         // Calculate offline decay
         const now = Date.now();
         const minutesPassed = Math.floor((now - lastUpdate) / (60 * 1000));
@@ -54,10 +54,10 @@ function modifyTilt(amount) {
 
         // Broadcast mood update
         const mood = getMood();
-        satellite.broadcast('mood_update', { 
-            level: tiltLevel, 
+        satellite.broadcast('mood_update', {
+            level: tiltLevel,
             description: mood.description,
-            delta: amount 
+            delta: amount
         });
     }
 }
@@ -73,7 +73,7 @@ function updateMood(text) {
 // Decay tilt every minute (cool off)
 setInterval(() => {
     if (tiltLevel > 0) {
-        tiltLevel = Math.max(0, tiltLevel - 1);
+        tiltLevel = Math.max(0, tiltLevel - 5);
         console.log(`[Mood] Cooling down... Current tilt: ${tiltLevel}%`);
         saveMood();
     }

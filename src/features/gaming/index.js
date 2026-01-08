@@ -2,6 +2,8 @@ const store = require('./store');
 const mood = require('../mood');
 const audio = require('../../integrations/discord/audio');
 const ai = require('../../integrations/ai');
+const history = require('../../core/history');
+const autoConversation = require('../auto_conversation');
 
 // Load commands
 require('./commands');
@@ -15,7 +17,7 @@ async function handlePresenceUpdate(oldPresence, newPresence) {
 
     const userId = newPresence.userId;
     const username = newPresence.member.displayName;
-    
+
     // Check for activities
     const activities = newPresence.activities;
     if (!activities || activities.length === 0) return;
@@ -39,7 +41,7 @@ async function handlePresenceUpdate(oldPresence, newPresence) {
     // Only comment if:
     // 1. Mina is in a voice channel with this user
     // 2. Cooldown has passed
-    
+
     const memberVoiceChannel = newPresence.member.voice.channel;
     if (!memberVoiceChannel) return; // User not in voice
 
@@ -75,9 +77,15 @@ Your current mood is: ${currentMood.description} (Tilt: ${currentMood.level}%).
     try {
         const response = await ai.generateResponse(prompt);
         if (response) {
-            // Strip tags if any (reuse logic or just speak raw if AI is good)
-            let spoken = response.replace(/\[.*?\]/g, '').trim();
+            // Strip tags and asterisks
+            let spoken = response.replace(/\[.*?\]/g, '').replace(/\*/g, '').trim();
+
+            // Speak it
             audio.speak(newPresence.guild.id, spoken);
+
+            // Record in History and Buffer so she remembers it
+            history.add(userId, 'assistant', spoken, 'Mina');
+            autoConversation.injectBotMessage(newPresence.guild.id, spoken);
         }
     } catch (e) {
         console.error('[Gaming] Error generating comment:', e);

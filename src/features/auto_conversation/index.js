@@ -72,12 +72,12 @@ async function processUtterance(text, context) {
     // Determine Cooldown
     const lastChime = lastChimeTimes.get(key) || 0;
     const hotUntil = hotThreads.get(key) || 0;
-    
+
     // Voice Logic: Disable "Hot Thread" mode to prevent constant replies in voice (too intrusive)
     const isHot = (type !== 'voice') && (now < hotUntil);
     const applicableCooldown = isHot ? HOT_THREAD_COOLDOWN : CHIME_COOLDOWN;
-    
-    
+
+
     // FEATURE: Topic Sniping / Smart Wake-up
     // If text contains keywords, boost chance to 100% and ignore line minimum
     // Removed general pronouns 'she'/'her' to reduce false positives
@@ -85,11 +85,11 @@ async function processUtterance(text, context) {
     // Actually .includes('ai') matches 'said'. We should use regex or word boundary.
     // For simplicity, let's just stick to the specific names.
     const lowerText = text.toLowerCase();
-    
+
     // Better keyword matching (whole word for short ones)
-    const isTargeted = ['mina', 'minabot'].some(k => lowerText.includes(k)) || 
-                      /\b(bot|ai|she|her)\b/i.test(text) && false; // Disabling broad pronouns for now as requested.
-    
+    const isTargeted = ['mina', 'minabot'].some(k => lowerText.includes(k)) ||
+        /\b(bot|ai|she|her)\b/i.test(text) && false; // Disabling broad pronouns for now as requested.
+
     // Let's stick to the user's implicit request: "she", "her" caused issues.
     // Safe list:
     const safeKeywords = ['mina', 'humanoid', 'robot', 'assistant'];
@@ -105,16 +105,16 @@ async function processUtterance(text, context) {
         console.log(`[AutoConvo] Debug Mode: Bypassing checks for ${key}`);
     } else {
         // Normal Passive Logic
-        
+
         // Check cooldown
         if (now - lastChime < applicableCooldown && !safeTargeted) {
-             // Too soon
-             return; 
+            // Too soon
+            return;
         }
 
         // FILTER: Very short messages in Hot/Normal mode (unless targeted/direct)
         // Ignored: "lol", "lmao", "ok", "skull emoji"
-        if (!safeTargeted && !isDirect && text.length < 5) return; 
+        if (!safeTargeted && !isDirect && text.length < 5) return;
 
         // Check activity level
         // If targeted, ignore min lines. If hot, ignore min lines (keep flow).
@@ -186,14 +186,14 @@ async function processUtterance(text, context) {
         if (context.userId) {
             memoryContext = await memory.getContext(context.userId, username, text);
         } else {
-             // Fallback if no specific target (e.g. ambient noise?), just get AI context?
-             // Or maybe getContext handles missing user? It expects userId.
-             // We'll just search generic if we have to.
-             const aiProfile = memory.getProfileData("MINA_SELF");
-             if (aiProfile.memories.length > 0) {
-                 const genericSearch = await memory.searchMemories(text, 3);
-                 if (genericSearch.length) memoryContext = `\n[Relevant Memories]\n${genericSearch.map(r => "- " + r.text).join('\n')}\n`;
-             }
+            // Fallback if no specific target (e.g. ambient noise?), just get AI context?
+            // Or maybe getContext handles missing user? It expects userId.
+            // We'll just search generic if we have to.
+            const aiProfile = memory.getProfileData("MINA_SELF");
+            if (aiProfile.memories.length > 0) {
+                const genericSearch = await memory.searchMemories(text, 3);
+                if (genericSearch.length) memoryContext = `\n[Relevant Memories]\n${genericSearch.map(r => "- " + r.text).join('\n')}\n`;
+            }
         }
     } catch (e) { console.error("[AutoConvo] Memory Context Error:", e); }
 
@@ -229,7 +229,7 @@ ${soundboard.getPromptSupplement()}
         // But if she responds, it becomes part of the shared history.
         // Let's only add to history if she decides to speak OR if it was a Direct Mention.
         if (isDirect && context.userId) {
-             history.add(context.userId, 'user', text, username);
+            history.add(context.userId, 'user', text, username);
         }
 
         const response = await ai.generateResponse(prompt);
@@ -249,26 +249,26 @@ ${soundboard.getPromptSupplement()}
             // Actually, we need to add HER response to history first? 
             // processUtterance is async. 
             // In pipeline: history.add(user) -> generate -> learn -> history.add(ai)
-            
+
             // Note: If we didn't add the user msg above (was passive), should we add it now?
             // If she speaks, the context is established. Ideally yes.
             // But if it was a group chat log... `text` is just the LAST message.
             // The prompt contained the TRANSCRIPT.
             // Learning should probably focus on the *Interaction*.
             // Let's simple-track: Add her response to history.
-            
+
             // Clean response for storage (strip tags)
-            const cleanResponse = response.replace(/\[.*?\]/g, '').trim(); 
-            
+            const cleanResponse = response.replace(/\[.*?\]/g, '').trim();
+
             // If we haven't added the user message yet (passive wake-up), add it now effectively as context
             if (!isDirect) {
-                 history.add(context.userId, 'user', text, username);
+                history.add(context.userId, 'user', text, username);
             }
 
             // Learn
             const h = history.get(context.userId);
             memory.learnFromInteraction(context.userId, text, cleanResponse, h);
-            
+
             // Add Assistant Response
             history.add(context.userId, 'assistant', cleanResponse, 'Mina');
         }
@@ -290,13 +290,13 @@ ${soundboard.getPromptSupplement()}
                 try {
                     const msg = await channel.messages.fetch(channel.lastMessageId);
                     if (msg) await msg.react(emoji);
-                } catch(e) { console.error("Failed to react:", e); }
+                } catch (e) { console.error("Failed to react:", e); }
             }
             return;
         }
 
         // Standard Processing (Status, Tilt, Anim, Sound)
-        let spokenResponse = response;
+        let spokenResponse = response.replace(/\*/g, ''); // Strip asterisks immediately
 
         // Parse Status
         const statusRegex = /\[status:\s*"?(.*?)"?\]/i;
@@ -362,4 +362,35 @@ ${soundboard.getPromptSupplement()}
     }
 }
 
-module.exports = { processUtterance };
+/**
+ * Inject a bot message into the buffer (for external features like Gaming)
+ * @param {string} guildId 
+ * @param {string} text 
+ */
+function injectBotMessage(guildId, text) {
+    // Determine key (Voice uses guildId)
+    // If text channel context is needed, we might need channelId, but mainly this is for Voice features
+    const key = guildId;
+
+    if (!conversationBuffers.has(key)) {
+        conversationBuffers.set(key, []);
+    }
+    const buffer = conversationBuffers.get(key);
+
+    const now = Date.now();
+    buffer.push({
+        text,
+        username: 'Mina',
+        userId: 'MINA_SELF',
+        time: now
+    });
+
+    // Clean Buffer
+    const validBuffer = buffer.filter(item => now - item.time < BUFFER_TIME_WINDOW);
+    if (validBuffer.length > BUFFER_SIZE) {
+        validBuffer.splice(0, validBuffer.length - BUFFER_SIZE);
+    }
+    conversationBuffers.set(key, validBuffer);
+}
+
+module.exports = { processUtterance, injectBotMessage };
