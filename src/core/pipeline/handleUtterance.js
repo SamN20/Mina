@@ -171,17 +171,11 @@ async function handleUtterance(text, context) {
             meta.newStatus = "Rage Quit";
         }
 
-        // Parse Soundboard mixed with text
-        // We use the sequence approach
-        const sequence = soundboard.parseMixedAudio(spokenResponse);
-
-        // Strip tags for clean text log/history
-        const originalResponse = spokenResponse;
-        spokenResponse = spokenResponse.replace(/\[sound:\s*(.*?)\]/gi, '').trim();
-
         // Parse DM Tags with Bracket Counting (Nested Support)
+        // We scan 'spokenResponse' directly to ensure we find and remove the tag from the text that will be spoken.
+        // We look for [dm: case-insensitive
         const dmStartMarker = "[dm:";
-        const dmStartIndex = originalResponse.toLowerCase().indexOf(dmStartMarker);
+        const dmStartIndex = spokenResponse.toLowerCase().indexOf(dmStartMarker);
         let dmAction = null;
 
         if (dmStartIndex !== -1) {
@@ -189,9 +183,9 @@ async function handleUtterance(text, context) {
             let dmEndIndex = -1;
 
             // Start scanning from the tag start
-            for (let i = dmStartIndex; i < originalResponse.length; i++) {
-                if (originalResponse[i] === '[') depth++;
-                else if (originalResponse[i] === ']') depth--;
+            for (let i = dmStartIndex; i < spokenResponse.length; i++) {
+                if (spokenResponse[i] === '[') depth++;
+                else if (spokenResponse[i] === ']') depth--;
 
                 if (depth === 0) {
                     dmEndIndex = i;
@@ -200,9 +194,9 @@ async function handleUtterance(text, context) {
             }
 
             if (dmEndIndex !== -1) {
-                const fullTag = originalResponse.substring(dmStartIndex, dmEndIndex + 1);
+                const fullTag = spokenResponse.substring(dmStartIndex, dmEndIndex + 1);
                 // Content inside [dm: ... ]
-                const content = originalResponse.substring(dmStartIndex + 4, dmEndIndex);
+                const content = spokenResponse.substring(dmStartIndex + 4, dmEndIndex);
 
                 // Split by first colon to get Name:Message
                 const firstColon = content.indexOf(':');
@@ -229,12 +223,23 @@ async function handleUtterance(text, context) {
             }
         }
 
+        // Parse Soundboard mixed with text
+        // We use the sequence approach
+        const sequence = soundboard.parseMixedAudio(spokenResponse);
+
+        // Strip tags for clean text
+        // Also strip closing tags if they appear
+        spokenResponse = spokenResponse.replace(/\[sound:\s*(.*?)\]/gi, '').replace(/\[\/sound\]/gi, '').trim();
+
         // Memory learn (clean text)
         const historyForLearning = history.get(context.userId);
         memory.learnFromInteraction(context.userId, query, spokenResponse, historyForLearning);
 
         // Update History (Add AI Response)
-        history.add(context.userId, 'assistant', spokenResponse, 'Mina');
+        // CRITICAL FIX: Save the RAW 'response' (with tags) effectively.
+        // If we save 'spokenResponse', the AI sees history where it "sent a DM" but there is no tag,
+        // so it learns to NOT generate tags.
+        history.add(context.userId, 'assistant', response, 'Mina');
 
         // Construct plan
         // Use AUDIO_SEQUENCE if we have multiple parts or just one sound part

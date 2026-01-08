@@ -28,7 +28,8 @@ async function generateResponse(prompt, history = []) {
         systemInstruction += `\n\n[CURRENT STATE]\nTilt Level: ${currentMood.level}%\nMood Description: ${currentMood.description}\n`;
         systemInstruction += `\n[INSTRUCTIONS]\nAnalyze the user's message. If they are rude, annoying, or mention things you hate (like Call of Duty), INCREASE your tilt level. If they are nice, funny, or talk about tech/coding, DECREASE it.\n`;
         systemInstruction += `To change your tilt, include a tag like [tilt: +10] or [tilt: -5] in your response. This tag will be hidden from the user.\n`;
-        systemInstruction += `To send a DM to someone, use the tag [dm:Name:Message]. For example: [dm:Sam:Something is wrong!]. You can do this if you need to tell them something private or urgent. If you need help contact Sam.\n`;
+        systemInstruction += `To send a DM to someone, use the tag [dm:Name:Message]. For example: [dm:Sam:Something is wrong!].\n`;
+        systemInstruction += `CRITICAL: If you say you will DM someone, you MUST include the tag. Do not just say "I'll DM them" without generating the tag, or nothing will happen.\n`;
         systemInstruction += `You can perform animations by including [anim:Name] in your response. Available animations: ${vrmAnimation.getAvailableAnimations()}.\n`;
 
         // Inject Time
@@ -77,7 +78,11 @@ async function generateResponse(prompt, history = []) {
     // Explicitly add time so it is the last thing the AI sees
     const nowP = new Date();
     const shortTime = nowP.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    messages.push({ "role": "user", "content": `[Current Time: ${shortTime}] ${prompt}` });
+
+    // INJECT SYSTEM REMINDER
+    // We append a hidden system reminder to the user's prompt to force attention to critical rules
+    const dmReminder = "\n[SYSTEM REMINDER: To send a DM, you MUST output [dm:Name:Message]. Don't forget the tag!]";
+    messages.push({ "role": "user", "content": `[Current Time: ${shortTime}] ${prompt}${dmReminder}` });
 
 
     try {
@@ -152,7 +157,7 @@ async function generateResponse(prompt, history = []) {
         }
     }
 
-    return "I'm having trouble thinking right now. The networks are busy.";
+    return "Someone tell Sam I have a problem with my AI.";
 }
 
 module.exports = { generateResponse };

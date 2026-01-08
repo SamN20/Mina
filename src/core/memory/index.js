@@ -639,6 +639,24 @@ async function searchMemories(text, limit = 5, userId = null) {
     }
 }
 
+function setExpectingDM(userId, allowed) {
+    const data = getProfileData(userId);
+    data.expectingDM = allowed;
+    // We don't necessarily need to save to disk for this ephemeral state, 
+    // but saving ensures it survives restarts.
+    saveMemory();
+    if (allowed) {
+        console.log(`[Memory] Now expecting a DM reply from ${userId}`);
+    } else {
+        console.log(`[Memory] No longer expecting DM from ${userId}`);
+    }
+}
+
+function isExpectingDM(userId) {
+    const data = getProfileData(userId);
+    return !!data.expectingDM;
+}
+
 module.exports = {
     getProfileData,
     getContext,
@@ -646,5 +664,7 @@ module.exports = {
     clearProfile,
     learnFromInteraction,
     searchMemories,
-    findUserByName
+    findUserByName,
+    setExpectingDM,
+    isExpectingDM
 };

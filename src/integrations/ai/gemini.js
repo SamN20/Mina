@@ -42,6 +42,7 @@ async function generateResponse(prompt) {
 - Keep it short and casual, under 2 sentences.
 - You can perform animations by including [anim:Name] in your response.
 - To send a DM, use [dm:Name:Message]. Example: [dm:Sam:Help me!].
+- CRITICAL: If you imply you are sending a DM, you MUST output the tag.
 - Available animations: ${vrmAnimation.getAvailableAnimations()}.
 
 User: ${prompt}

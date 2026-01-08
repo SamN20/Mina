@@ -15,6 +15,7 @@ const gaming = require('./src/features/gaming');
 const reactions = require('./src/features/reactions');
 const analytics = require('./src/features/analytics');
 const greetings = require('./src/features/greetings'); // Fixed: Added missing import
+const { handleDM } = require('./src/core/pipeline/handleDM');
 require('./src/features'); // Load all features (Commands)
 
 // Satellite Server Setup
@@ -481,7 +482,7 @@ client.on(Events.MessageCreate, async message => {
 
         // Check for Mentions or Replies
         const isMentioned = message.mentions.users.has(client.user.id);
-        
+
         let isReply = false;
         let replyContext = null;
 
@@ -596,9 +597,17 @@ client.on(Events.MessageCreate, async message => {
         return message.reply(`Okay, I've set a reminder for "${reminderData.message}" at ${new Date(reminderData.remindAt).toLocaleTimeString()}.`);
     }
 
-    // 3. Default Chat
-    // Maybe just acknowledge?
-    // message.reply("I only understand reminders right now in DMs.");
+    // 3. Default Chat (Conversation via handleDM)
+    // If permission exists (or Admin), this generates a reply
+    const response = await handleDM(text, message.author);
+    if (response) {
+        await message.reply(response);
+    } else {
+        // Optional: If they are NOT allowed, we could send a specific "I can't talk right now" message?
+        // But silence is probably better to avoid spamming "Unknown command".
+        // Or specific log?
+        // console.log(`[Index] DM ignored (No permission)`);
+    }
 });
 
 client.on(Events.PresenceUpdate, (oldPresence, newPresence) => {

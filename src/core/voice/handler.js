@@ -62,6 +62,8 @@ async function executePlan(plan, guildId, userId, client) {
                 if (user) {
                     await user.send(message);
                     storage.logEvent(user.username, userId, `AI sent DM: "${message}"`);
+                    // Allow user to reply
+                    memory.setExpectingDM(userId, true);
                 } else {
                     console.warn(`[Voice] Failed to fetch user ${userId} for DM.`);
                     storage.logEvent("Unknown", userId, `Failed to send DM (User not found): "${message}"`);
