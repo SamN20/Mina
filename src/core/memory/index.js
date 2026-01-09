@@ -443,7 +443,11 @@ Instructions:
      - ONLY Remove if the User has **Answered**, **Acknowledged**, or **Refused** in the [Current Interaction].
      - If the AI asked the question but the User has NOT answered yet (or this is just the AI asking), **DO NOT REMOVE**. Keep the plan active until resolved.
 6. **STRICTLY IGNORE** facts about third parties unless they define a relationship.
-7. **NO DUPLICATES**: Do NOT extract facts appearing in [Existing Knowledge].
+7. **BLOCKLIST (DO NOT EXTRACT)**:
+   - Current Time, Date, or Weather (e.g. "It is 11:47 PM", "Mina knows the time").
+   - Transient States (e.g. "User went to bed", "User is online").
+   - Trivial AI Knowledge (e.g. "Mina knows user's name").
+8. **NO DUPLICATES**: Do NOT extract facts appearing in [Existing Knowledge].
 
 Output Format:
 {
@@ -460,6 +464,11 @@ Output Format:
             forceThoughts: false,
             systemInstruction: "You are a strict JSON data extractor. Output ONLY valid JSON."
         });
+
+        if (!output) {
+            console.log("[Memory] Extraction failed: No output from AI.");
+            return;
+        }
 
         // Cleanup markdown if present (e.g. ```json ... ```)
         // Since thoughts are disabled, we don't need the Thought Parser logic here.
@@ -505,6 +514,9 @@ Output Format:
                     // Determine target profile
                     const targetId = (item.subject === 'ai') ? "MINA_SELF" : userId;
                     const targetProfile = getProfileData(targetId);
+
+                    // VALIDATION CHECK
+                    if (!item.text || typeof item.text !== 'string') continue;
 
                     // Check for duplicates (Exact + Semantic)
                     const exactMatch = targetProfile.memories.find(m => m.text === item.text);

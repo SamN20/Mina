@@ -27,9 +27,17 @@ function parseResponse(rawResponse) {
     }
 
     // 2. Cleanup Hallucinated Timestamps/Prefixes
-    // e.g. "[1/6 10:00] (Mina): text"
-    spokenText = spokenText.replace(/^\[\d{1,2}\/\d{1,2}\s\d{2}:\d{2}\]\s*(\(.*?\))?:?\s*/, '').trim();
-    spokenText = spokenText.replace(/^\[.*?\]\s*\(.*?\):\s*/, '').trim();
+    // e.g. "[1/6 10:00] (Mina): text" or "[User]: text" or "<msg ...> text"
+    // We run this globally to catch "double responses" where the AI acts out multiple turns.
+
+    // Pattern 1: [Date/Time] (Name):
+    spokenText = spokenText.replace(/\[\d{1,2}\/\d{1,2}\s\d{2}:\d{2}\]\s*(\(.*?\))?:?\s*/g, ' ').trim();
+
+    // Pattern 2: (Name): or [Name]: prefix (common fallback)
+    spokenText = spokenText.replace(/^\s*[\[\(].*?[\]\)]:\s*/gm, ' ').trim();
+
+    // Pattern 3: XML msg tags (just in case they leaked into spoken text)
+    spokenText = spokenText.replace(/<msg.*?>/gi, '').replace(/<\/msg>/gi, '').trim();
 
     // 3. Extract Status
     const statusRegex = /\[status:\s*"?(.*?)"?\]/i;

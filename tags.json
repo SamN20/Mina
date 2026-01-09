@@ -1,0 +1,31 @@
+{
+    "tags": [
+        {
+            "tag": "[tilt: amount]",
+            "description": "Adjusts your anger/tilt level. e.g. [tilt: +10] (Hidden)"
+        },
+        {
+            "tag": "[dm:Name:Message]",
+            "description": "Sends a Direct Message to a user. e.g. [dm:Sam:Hello!]"
+        },
+        {
+            "tag": "[status: \"Status Text\"]",
+            "description": "Changes your Discord status. e.g. [status: \"Gaming\"]"
+        },
+        {
+            "tag": "[anim:Name]",
+            "description": "Triggers a VRM animation."
+        },
+        {
+            "tag": "[sound:Name]",
+            "description": "Plays a sound effect."
+        }
+    ],
+    "emotions": [
+        "[cheerful]",
+        "[sad]",
+        "[angry]",
+        "[whispering]",
+        "[affectionate]"
+    ]
+}

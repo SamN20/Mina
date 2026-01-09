@@ -77,8 +77,8 @@ async function handleUtterance(text, context) {
     const memoryContext = await memory.getContext(context.userId, context.username, query);
 
     const now = new Date();
-    const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const dateString = now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+    const timeString = now.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit' });
+    const dateString = now.toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'long', month: 'long', day: 'numeric' });
 
     const fullPrompt = `${memoryContext}\n[Your Current Status: "${context.currentStatus || 'Online'}"]\n${soundboard.getPromptSupplement()}\nUser: ${query}`;
 
