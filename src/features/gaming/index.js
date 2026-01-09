@@ -77,15 +77,27 @@ Your current mood is: ${currentMood.description} (Tilt: ${currentMood.level}%).
     try {
         const response = await ai.generateResponse(prompt);
         if (response) {
-            // Strip tags and asterisks
-            let spoken = response.replace(/\[.*?\]/g, '').replace(/\*/g, '').trim();
+            // Use Parser
+            const parser = require('../../core/ai/parser');
+            const parsed = parser.parseResponse(response);
+
+            // Log thought
+            if (parsed.thoughts) console.log(`[Gaming Thought] ${parsed.thoughts}`);
+
+            // Apply mood
+            if (parsed.actions.tilt !== null) mood.modifyTilt(parsed.actions.tilt);
+
+            let spoken = parsed.spokenText;
 
             // Speak it
             audio.speak(newPresence.guild.id, spoken);
 
             // Record in History and Buffer so she remembers it
-            history.add(userId, 'assistant', spoken, 'Mina');
-            autoConversation.injectBotMessage(newPresence.guild.id, spoken);
+            // We save the raw response (with thoughts/tags) to history so she learns from it properly?
+            // Actually, for history, we usually save what was said + actions.
+            // Let's align with handleUtterance: save RAW response.
+            history.add(userId, 'assistant', response, 'Mina'); // Save RAW to history
+            autoConversation.injectBotMessage(newPresence.guild.id, spoken); // Inject CLEAN to autoconvo buffer
         }
     } catch (e) {
         console.error('[Gaming] Error generating comment:', e);

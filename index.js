@@ -109,17 +109,7 @@ try {
 
 const wrapped = require('./src/features/wrapped/store');
 
-const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildVoiceStates,
-        GatewayIntentBits.DirectMessages,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildPresences
-    ],
-    partials: [Partials.Channel] // Required for DMs
-});
+const { client } = require('./src/integrations/discord/client');
 
 client.commands = new Collection();
 const commandsPath = path.join(__dirname, 'commands');

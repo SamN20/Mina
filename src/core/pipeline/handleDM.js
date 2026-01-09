@@ -55,12 +55,22 @@ async function handleDM(text, user) {
 
     console.log(`[DM Pipeline] AI Response: "${response}"`);
 
-    // 6. Cleanup Response (Strip tags that don't make sense in text, or keep them?)
-    // In DMs, [sound] tags are useless but [cheerful] might be nice flavor text.
-    // Let's strip technical tags but keep flavor?
-    // Actually, tags like [dm] inside a DM would be recursive/weird.
-    // Let's strip [sound] and [dm].
-    let cleanResponse = response.replace(/\[sound:.*?\]/gi, '').replace(/\[dm:.*?\]/gi, '').trim();
+    // 6. Cleanup Response using Shared Parser
+    const parser = require('../ai/parser');
+    const parsed = parser.parseResponse(response);
+
+    // Log Thoughts (but don't send)
+    if (parsed.thoughts) {
+        console.log(`\n-----[DM Thoughts]-----\n${parsed.thoughts}\n-----`);
+    }
+
+    // Apply Mood Tilt (DMs can affect mood too)
+    if (parsed.actions.tilt !== null) {
+        mood.modifyTilt(parsed.actions.tilt);
+    }
+
+    // Strip tags and use clean text
+    let cleanResponse = parsed.spokenText;
 
     // 7. Update History (AI)
     // Save RAW response to maintain consistency
@@ -68,7 +78,8 @@ async function handleDM(text, user) {
 
     // 8. Learning
     const historyForLearning = history.get(userId);
-    memory.learnFromInteraction(userId, text, cleanResponse, historyForLearning);
+    // Include thoughts in learning!
+    memory.learnFromInteraction(userId, text, cleanResponse, historyForLearning, parsed.thoughts);
 
     // 9. Consume Permission (if not Admin)
     if (!isAdmin) {

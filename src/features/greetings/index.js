@@ -6,6 +6,8 @@ const storage = require('../../core/storage');
 const lastGreetingTime = new Map();
 const GREETING_COOLDOWN = 20 * 60 * 1000; // 20 Minutes
 
+const parser = require('../../core/ai/parser');
+
 /**
  * Greet a new user joining the channel
  * @param {string} guildId 
@@ -54,10 +56,12 @@ User Facts: ${facts}
 
 Generate the spoken greeting:
 `;
-        const greeting = await ai.generateResponse(prompt);
-        if (greeting) {
-            console.log(`[User Join Greeting] "${greeting}"`);
-            audio.speak(guildId, String(greeting));
+        const output = await ai.generateResponse(prompt);
+        if (output) {
+            const parsed = parser.parseResponse(output);
+            console.log(`[User Join Greeting] Thoughts: ${parsed.thoughts}`);
+            console.log(`[User Join Greeting] Spoken: "${parsed.spokenText}"`);
+            audio.speak(guildId, parsed.spokenText);
         } else {
             audio.speak(guildId, `Hello ${name}, voice transcription is active.`);
         }
@@ -115,15 +119,17 @@ ${userContexts}
 [Instructions]
 - ${instructions}
 - Keep it VERY SHORT (under 2 sentences).
-- MANDATORY: End with this exact phrase: "By the way, voice transcription is now active."
+- MANDATORY: End with this phrase: "voice transcription is now active."
 
 Generate the spoken greeting:
 `;
 
-        const greeting = await ai.generateResponse(prompt);
-        if (greeting) {
-            console.log(`[Join Greeting] "${greeting}"`);
-            audio.speak(channel.guild.id, String(greeting));
+        const output = await ai.generateResponse(prompt);
+        if (output) {
+            const parsed = parser.parseResponse(output);
+            console.log(`[Join Greeting] Thoughts: ${parsed.thoughts}`);
+            console.log(`[Join Greeting] Spoken: "${parsed.spokenText}"`);
+            audio.speak(channel.guild.id, parsed.spokenText);
         } else {
             audio.speak(channel.guild.id, "Hello everyone! Voice transcription is now active.");
         }
@@ -165,8 +171,12 @@ User Facts: ${facts}
 
 Generate greeting:
 `;
-        const greeting = await ai.generateResponse(prompt);
-        return String(greeting || `Hello ${name}, recording is active.`);
+        const output = await ai.generateResponse(prompt);
+        if (output) {
+            const parsed = parser.parseResponse(output);
+            return parsed.spokenText;
+        }
+        return `Hello ${name}, recording is active.`;
 
     } catch (e) {
         console.error("Generate greeting failed:", e);

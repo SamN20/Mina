@@ -95,50 +95,31 @@ async function handleUtterance(text, context) {
     if (response) {
         // Wrapped: increment AI interaction
         try { wrapped.incrAIInteraction(context.userId, context.guildId, 1); } catch (e) { }
-        // Parse status changes from response
-        let spokenResponse = response;
 
-        // Parse Status
-        const statusRegex = /\[status:\s*"?(.*?)"?\]/i;
-        const statusMatch = spokenResponse.match(statusRegex);
-        let meta = {};
-        if (statusMatch) {
-            meta.newStatus = statusMatch[1];
-            spokenResponse = spokenResponse.replace(statusRegex, '').trim();
+        // Use Shared Parser
+        const parser = require('../ai/parser');
+        const parsed = parser.parseResponse(response);
+
+        let spokenResponse = parsed.spokenText;
+        const meta = { newStatus: parsed.actions.status };
+
+        // Log Thoughts
+        if (parsed.thoughts) {
+            console.log(`\n\x1b[36m[Mina's Thoughts]\x1b[0m\n${parsed.thoughts}\n`);
         }
 
-        // Parse Tilt (Mood)
-        const tiltRegex = /\[tilt:\s*([+-]?\d+)\]/i;
-        const tiltMatch = spokenResponse.match(tiltRegex);
-        if (tiltMatch) {
-            const delta = parseInt(tiltMatch[1], 10);
-            if (!isNaN(delta)) {
-                mood.modifyTilt(delta);
-            }
-            spokenResponse = spokenResponse.replace(tiltRegex, '').trim();
+        // Apply Mood Tilt
+        if (parsed.actions.tilt !== null) {
+            mood.modifyTilt(parsed.actions.tilt);
         }
 
-        // Parse Animations (Tag System) - Support Multiple
-        const animRegex = /\[anim:\s*(.*?)\]/gi;
-        let triggeredAnim = null;
-        let match;
-
-        // Find all matches
+        // Handle Animations
         const satellite = require('../../integrations/satellite');
-
-        // We use a temporary string to avoid infinite loop if we were replacing in place using exec
-        // But cleaner way: match all, then replace all
-        const animMatches = [...spokenResponse.matchAll(animRegex)];
-
-        if (animMatches.length > 0) {
-            animMatches.forEach((m, index) => {
-                const animName = m[1].trim();
+        let triggeredAnim = null;
+        if (parsed.actions.anims.length > 0) {
+            parsed.actions.anims.forEach((animName, index) => {
                 console.log(`[Pipeline] AI Triggered Animation: ${animName}`);
-                triggeredAnim = animName; // Just track at least one was found
-
-                // Play with slight delay between if multiple? 
-                // Currently satellite just blasts them. 
-                // Let's stagger them slightly if multiple? e.g. 2s apart
+                triggeredAnim = animName;
                 setTimeout(() => {
                     if (satellite && satellite.playGesture) {
                         satellite.playGesture(null, animName);
@@ -147,23 +128,17 @@ async function handleUtterance(text, context) {
                     }
                 }, index * 2500);
             });
-
-            // Remove tags from speech
-            spokenResponse = spokenResponse.replace(animRegex, '').trim();
         }
 
-        // Trigger VRM animations based on keywords (Legacy/Fallback)
-        // Only if AI didn't explicitly ask for one
+        // VRM Fallback
         if (!triggeredAnim) {
             try {
                 const currentMood = mood.getMood();
                 vrmAnimation.triggerAnimationForResponse(spokenResponse, { mood: currentMood });
-            } catch (err) {
-                console.error('[VRM Animation] Error:', err);
-            }
+            } catch (err) { console.error('[VRM Animation] Error:', err); }
         }
 
-        // Check for Rage Quit Condition (Tilt >= 100)
+        // Rage Quit Check
         let shouldLeave = false;
         if (mood.getMood().level >= 100) {
             console.log('[Pipeline] Tilt reached 100%. Triggering Rage Quit.');
@@ -171,69 +146,29 @@ async function handleUtterance(text, context) {
             meta.newStatus = "Rage Quit";
         }
 
-        // Parse DM Tags with Bracket Counting (Nested Support)
-        // We scan 'spokenResponse' directly to ensure we find and remove the tag from the text that will be spoken.
-        // We look for [dm: case-insensitive
-        const dmStartMarker = "[dm:";
-        const dmStartIndex = spokenResponse.toLowerCase().indexOf(dmStartMarker);
+        // Handle DM
         let dmAction = null;
-
-        if (dmStartIndex !== -1) {
-            let depth = 0;
-            let dmEndIndex = -1;
-
-            // Start scanning from the tag start
-            for (let i = dmStartIndex; i < spokenResponse.length; i++) {
-                if (spokenResponse[i] === '[') depth++;
-                else if (spokenResponse[i] === ']') depth--;
-
-                if (depth === 0) {
-                    dmEndIndex = i;
-                    break;
-                }
-            }
-
-            if (dmEndIndex !== -1) {
-                const fullTag = spokenResponse.substring(dmStartIndex, dmEndIndex + 1);
-                // Content inside [dm: ... ]
-                const content = spokenResponse.substring(dmStartIndex + 4, dmEndIndex);
-
-                // Split by first colon to get Name:Message
-                const firstColon = content.indexOf(':');
-                if (firstColon !== -1) {
-                    const targetName = content.substring(0, firstColon).trim();
-                    const messageContent = content.substring(firstColon + 1).trim();
-
-                    console.log(`[Pipeline] AI wants to DM "${targetName}": "${messageContent}"`);
-
-                    const targetUser = memory.findUserByName(targetName);
-                    if (targetUser) {
-                        console.log(`[Pipeline] Resolved "${targetName}" to User ID: ${targetUser.id}`);
-                        dmAction = {
-                            userId: targetUser.id,
-                            message: messageContent
-                        };
-                    } else {
-                        console.warn(`[Pipeline] Could not find user "${targetName}" for DM.`);
-                    }
-                }
-
-                // Remove DM tag from spoken response
-                spokenResponse = spokenResponse.replace(fullTag, '').trim();
+        if (parsed.actions.dm) {
+            const { targetName, messageContent } = parsed.actions.dm;
+            console.log(`[Pipeline] AI wants to DM "${targetName}": "${messageContent}"`);
+            const targetUser = memory.findUserByName(targetName);
+            if (targetUser) {
+                console.log(`[Pipeline] Resolved "${targetName}" to User ID: ${targetUser.id}`);
+                dmAction = { userId: targetUser.id, message: messageContent };
+            } else {
+                console.warn(`[Pipeline] Could not find user "${targetName}" for DM.`);
             }
         }
 
         // Parse Soundboard mixed with text
-        // We use the sequence approach
         const sequence = soundboard.parseMixedAudio(spokenResponse);
 
-        // Strip tags for clean text
-        // Also strip closing tags if they appear
+        // Strip tags for clean text for memory/TTS
         spokenResponse = spokenResponse.replace(/\[sound:\s*(.*?)\]/gi, '').replace(/\[\/sound\]/gi, '').trim();
 
-        // Memory learn (clean text)
+        // Memory learn
         const historyForLearning = history.get(context.userId);
-        memory.learnFromInteraction(context.userId, query, spokenResponse, historyForLearning);
+        memory.learnFromInteraction(context.userId, query, spokenResponse, historyForLearning, parsed.thoughts);
 
         // Update History (Add AI Response)
         // CRITICAL FIX: Save the RAW 'response' (with tags) effectively.

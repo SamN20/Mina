@@ -9,7 +9,10 @@ const FALLBACK_MODEL = 'meta-llama/llama-3.3-70b-instruct:free';
 // Helper function removed, now inline in generateResponse to support full history
 
 
-async function generateResponse(prompt, history = []) {
+async function generateResponse(prompt, history = [], options = {}) {
+    // Default options
+    const { forceThoughts = true } = options;
+
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) {
         return "I'm missing my OpenRouter API key.";
@@ -17,37 +20,44 @@ async function generateResponse(prompt, history = []) {
 
     // Load Personality
     let systemInstruction = "You are a helpful assistant.";
-    try {
-        const configPath = path.join(__dirname, '../../../ai_config.txt');
-        if (fs.existsSync(configPath)) {
-            systemInstruction = fs.readFileSync(configPath, 'utf8');
-        }
 
-        // Inject Mood
-        const currentMood = mood.getMood();
-        systemInstruction += `\n\n[CURRENT STATE]\nTilt Level: ${currentMood.level}%\nMood Description: ${currentMood.description}\n`;
-        systemInstruction += `\n[INSTRUCTIONS]\nAnalyze the user's message. If they are rude, annoying, or mention things you hate (like Call of Duty), INCREASE your tilt level. If they are nice, funny, or talk about tech/coding, DECREASE it.\n`;
-        systemInstruction += `To change your tilt, include a tag like [tilt: +10] or [tilt: -5] in your response. This tag will be hidden from the user.\n`;
-        systemInstruction += `To send a DM to someone, use the tag [dm:Name:Message]. For example: [dm:Sam:Something is wrong!].\n`;
-        systemInstruction += `CRITICAL: If you say you will DM someone, you MUST include the tag. Do not just say "I'll DM them" without generating the tag, or nothing will happen.\n`;
-        systemInstruction += `You can perform animations by including [anim:Name] in your response. Available animations: ${vrmAnimation.getAvailableAnimations()}.\n`;
+    // OVERRIDE: If a custom system instruction is provided (e.g. for Memory), use it and skip persona loading.
+    if (options.systemInstruction) {
+        systemInstruction = options.systemInstruction;
+    } else {
+        // Standard Persona Loading
+        try {
+            const configPath = path.join(__dirname, '../../../ai_config.txt');
+            if (fs.existsSync(configPath)) {
+                systemInstruction = fs.readFileSync(configPath, 'utf8');
+            }
 
-        // Inject Time
-        const now = new Date();
-        const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        const dateString = now.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-        systemInstruction += `\n[TIME CONTEXT]\nCurrent Time: ${dateString} at ${timeString}\n`;
-        systemInstruction += `\n[NOTE]\nThe chat history usually includes timestamps [MM/DD HH:MM] for your reference. DO NOT include these timestamps or your name in your actual response. Just speak naturally.\n`;
+            // Inject Mood
+            const currentMood = mood.getMood();
+            systemInstruction += `\n\n[CURRENT STATE]\nTilt Level: ${currentMood.level}%\nMood Description: ${currentMood.description}\n`;
+            systemInstruction += `\n[INSTRUCTIONS]\nAnalyze the user's message. If they are rude, annoying, or mention things you hate (like Call of Duty), INCREASE your tilt level. If they are nice, funny, or talk about tech/coding, DECREASE it.\n`;
+            systemInstruction += `To change your tilt, include a tag like [tilt: +10] or [tilt: -5] in your response. This tag will be hidden from the user.\n`;
+            systemInstruction += `To send a DM to someone, use the tag [dm:Name:Message]. For example: [dm:Sam:Something is wrong!].\n`;
+            systemInstruction += `CRITICAL: If you say you will DM someone, you MUST include the tag. Do not just say "I'll DM them" without generating the tag, or nothing will happen.\n`;
+            systemInstruction += `You can perform animations by including [anim:Name] in your response. Available animations: ${vrmAnimation.getAvailableAnimations()}.\n`;
+
+            // Inject Time
+            const now = new Date();
+            const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const dateString = now.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+            systemInstruction += `\n[TIME CONTEXT]\nCurrent Time: ${dateString} at ${timeString}\n`;
+            systemInstruction += `\n[NOTE]\nThe chat history usually includes timestamps [MM/DD HH:MM] for your reference. DO NOT include these timestamps or your name in your actual response. Just speak naturally.\n`;
 
 
-        if (currentMood.level >= 95) {
-            systemInstruction += "You are at MAX TILT. You are furious. Yell at them, tell them you are leaving, and then STOP TALKING.\n";
-        } else if (currentMood.level > 80) {
-            systemInstruction += "You are currently VERY ANGRY. Respond aggressively and complain about lag or teammates.\n";
-        } else if (currentMood.level > 50) {
-            systemInstruction += "You are annoyed. Be sarcastic and short.\n";
-        }
-    } catch (e) { }
+            if (currentMood.level >= 95) {
+                systemInstruction += "You are at MAX TILT. You are furious. Yell at them, tell them you are leaving, and then STOP TALKING.\n";
+            } else if (currentMood.level > 80) {
+                systemInstruction += "You are currently VERY ANGRY. Respond aggressively and complain about lag or teammates.\n";
+            } else if (currentMood.level > 50) {
+                systemInstruction += "You are annoyed. Be sarcastic and short.\n";
+            }
+        } catch (e) { }
+    }
 
     const selectedModel = storage.getAiModel() || process.env.OPENROUTER_MODEL || FALLBACK_MODEL;
 
@@ -81,8 +91,18 @@ async function generateResponse(prompt, history = []) {
 
     // INJECT SYSTEM REMINDER
     // We append a hidden system reminder to the user's prompt to force attention to critical rules
-    const dmReminder = "\n[SYSTEM REMINDER: To send a DM, you MUST output [dm:Name:Message]. Don't forget the tag!]";
-    messages.push({ "role": "user", "content": `[Current Time: ${shortTime}] ${prompt}${dmReminder}` });
+    let userContent = `[Current Time: ${shortTime}] ${prompt}`;
+
+    // DM Reminder (Keep always? or only if forceThoughts is true? Probably always useful for persona)
+    // Actually, DM logic is part of persona. Memory system doesn't need DMs either.
+    // Let's attach reminders only if forceThoughts is TRUE (implying persona mode).
+    if (forceThoughts) {
+        const dmReminder = "\n[SYSTEM REMINDER: To send a DM, you MUST output [dm:Name:Message]. Don't forget the tag!]";
+        const thoughtReminder = "\n[SYSTEM REMINDER: You MUST start your response with a <thought> block! Internalize your reasoning first.]";
+        userContent += dmReminder + thoughtReminder;
+    }
+
+    messages.push({ "role": "user", "content": userContent });
 
 
     try {

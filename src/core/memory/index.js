@@ -276,6 +276,26 @@ async function getContext(userId, discordName, text = "") {
                 context += `\n[My (AI) Relevant Memories]\n- ${aiRelevant.map(m => m.text).join('\n- ')}\n`;
             }
 
+            // --- Active Schemes Injection ---
+            try {
+                // Filter for 'plans' category in AI memories
+                // We want ALL active plans, not just semantically relevant ones, 
+                // because a plan is a long-term intention that should be top-of-mind.
+                // We limit to top 5 most recent to avoid identifying old completed plans (unless we have a 'status' field, which we don't yet).
+                // Assuming 'timestamp' is the creation time.
+                const activePlans = aiData.memories
+                    .filter(m => m.category === 'plans')
+                    .sort((a, b) => b.timestamp - a.timestamp) // Newest first
+                    .slice(0, 5);
+
+                if (activePlans.length > 0) {
+                    context += `\n[Active Schemes & Plans]\n(These are your secret goals. Work towards them casually.)\n- ${activePlans.map(m => m.text).join('\n- ')}\n`;
+                    logDetails += `\n[Active Schemes] ${activePlans.length} plans injected.`;
+                }
+            } catch (e) {
+                console.error("[Memory] Failed to inject active schemes:", e);
+            }
+
             // --- Check for Mentioned Users ---
             // Iterate through all known users to see if they are mentioned in the text
             for (const otherId in memory) {
@@ -315,7 +335,7 @@ async function getContext(userId, discordName, text = "") {
 
 // --- Learning ---
 
-async function learnFromInteraction(userId, userQuery, aiResponse, history = []) {
+async function learnFromInteraction(userId, userQuery, aiResponse, history = [], thoughtContent = "") {
     try {
         const profile = getProfileData(userId);
         const knownName = profile.displayName || "Unknown";
@@ -375,68 +395,79 @@ async function learnFromInteraction(userId, userQuery, aiResponse, history = [])
             }
         } catch (e) { console.error("[Memory] Truth lookup failed:", e); }
 
+        // --- Active Plans Lookup (for Completion Check) ---
+        let activePlansContext = "";
+        try {
+            const aiData = getProfileData("MINA_SELF");
+            const activePlans = aiData.memories
+                .filter(m => m.category === 'plans')
+                .sort((a, b) => b.timestamp - a.timestamp); // Newest first
+
+            if (activePlans.length > 0) {
+                activePlansContext = `\n[Active Plans via Memory]\n(These are plans the AI previously committed to. If they are done, REMOVE them.)\n- ${activePlans.map(m => m.text).join('\n- ')}\n`;
+            }
+        } catch (e) { console.error("[Memory] Active plans lookup failed:", e); }
+
         // Format History (Last 10 lines)
         const recentHistory = history.slice(-10).map(m => `[${m.role === 'user' ? 'User' : 'AI'}]: ${m.content}`).join('\n');
 
         const extractionPrompt = `
 Analyze the interaction between User (${knownName}) and AI (Mina).
 Extract new facts to store in long-term memory.
-Categorize each fact into: 'personal', 'preferences', 'relationships', or 'trivia'.
+Categorize each fact into: 'personal', 'preferences', 'relationships', 'plans', or 'trivia'.
 Identify if the fact is about the User or the AI.
 
 ${existingContext}
 ${truthContext}
+${activePlansContext}
 
-[Recent Conversation] (CONTEXT ONLY - DO NOT EXTRACT FACTS FROM HERE)
+[Recent Conversation] (CONTEXT ONLY)
 ${recentHistory}
 
 [Current Interaction] (EXTRACT FACTS FROM HERE)
 User: "${userQuery}"
-AI: "${aiResponse}"
+Mina's Secret Thoughts: "${thoughtContent}"
+Mina's Spoken Response: "${aiResponse}"
 
 Instructions:
 1. **TRUTH CHECK**: If Speaker makes a claim about a Mentioned Person, check [Mentioned People (TRUTH)].
-   - If Speaker's claim contradicts Truth, record as: "Speaker *claims* [fact] (Contradicted by Truth)".
-2. Extract explicit facts stated by the user about *themselves* (e.g. "I like pizza").
-3. Extract explicit facts stated by the AI about *itself* (e.g. "I love JRPGs").
-4. **STRICTLY IGNORE** facts about third parties (anyone other than ${knownName} or Mina).
-   - **CRITICAL**: If the AI mentions a fact about a third party (e.g. "Sam likes Battlefield"), **DO NOT** attribute this to the User (${knownName}).
-   - Example: User asks "What does Sam like?", AI answers "Sam likes apples". Result: NO FACT EXTRACTED.
-   - **EXCEPTION**: Only extract if it defines a direct relationship to the User (e.g. "Sam is my friend", "I hate Sam").
-5. Do NOT extract questions or temporary states (e.g. "I am hungry").
-6. **NO DUPLICATES**: Do NOT extract facts that are already listed in [Existing Knowledge] unless they have fundamentally changed (e.g. "I love cats" -> "I hate cats").
-7. **SCOPE**: Only extract facts from the **Current Interaction** (last 2 lines). Use [Recent Conversation] ONLY for context (e.g. to resolve pronouns like "he", "it"). DO NOT extract facts from [Recent Conversation] that happened earlier.
-8. **REMOVAL**: If the User explicitly asks to forget something, or if a new fact contradicts an old memory (visible in Context), add the *exact text* of the old memory to the 'remove' list.
-9. Output strictly valid JSON.
+2. Extract explicit facts stated by the User about themselves.
+3. Extract explicit facts stated by the AI about itself.
+4. **INTERNAL PLANS**: Check [Mina's Secret Thoughts]. Extract *future* plans/schemes.
+   - **IGNORE** plans that were executed *immediately* in the [Current Interaction].
+     - Bad Fact: "Mina plans to greet User" (She just did it).
+     - Good Fact: "Mina plans to verify if User sleeps late *tomorrow*" (Future action).
+5. **PLAN COMPLETION**: Check [Active Plans].
+   - **Case A: Action Plans** (e.g. "Greet User", "Tell Joke"): If AI did it in the [Current Interaction], REMOVE it.
+   - **Case B: Inquiry Plans** (e.g. "Ask User about X", "Find out Y"):
+     - ONLY Remove if the User has **Answered**, **Acknowledged**, or **Refused** in the [Current Interaction].
+     - If the AI asked the question but the User has NOT answered yet (or this is just the AI asking), **DO NOT REMOVE**. Keep the plan active until resolved.
+6. **STRICTLY IGNORE** facts about third parties unless they define a relationship.
+7. **NO DUPLICATES**: Do NOT extract facts appearing in [Existing Knowledge].
 
 Output Format:
 {
   "facts": [
-    { "text": "User owns a cat named Bo", "category": "personal", "subject": "user" },
-    { "text": "Mina loves JRPGs", "category": "preferences", "subject": "ai" },
-    { "text": "Speaker claims Joe is German (Contradicted by Truth)", "category": "relationships", "subject": "user" }
+    { "text": "Mina plans to surprise User", "category": "plans", "subject": "ai" },
+    { "text": "User loves pizza", "category": "preferences", "subject": "user" }
   ],
   "remove": [
-    { "text": "User owns a dog", "subject": "user" }
+    { "text": "Mina plans to greet User", "subject": "ai" } 
   ]
 }
 `;
+        let output = await ai.generateResponse(extractionPrompt, [], {
+            forceThoughts: false,
+            systemInstruction: "You are a strict JSON data extractor. Output ONLY valid JSON."
+        });
 
-        let output = await ai.generateResponse(extractionPrompt);
-
-        // Robust JSON extraction
-        const jsonStart = output.indexOf('{');
-        const jsonEnd = output.lastIndexOf('}');
-        if (jsonStart !== -1 && jsonEnd !== -1) {
-            output = output.substring(jsonStart, jsonEnd + 1);
-        } else {
-            // Fallback cleanup if no braces found (unlikely but possible)
-            output = output.replace(/```json/g, '').replace(/```/g, '').trim();
-        }
+        // Cleanup markdown if present (e.g. ```json ... ```)
+        // Since thoughts are disabled, we don't need the Thought Parser logic here.
+        let jsonText = output.replace(/```json/g, '').replace(/```/g, '').trim();
 
         let result;
         try {
-            result = JSON.parse(output);
+            result = JSON.parse(jsonText);
         } catch (e) {
             console.error("[Memory] JSON Parse Error. Raw output:", output);
             return;

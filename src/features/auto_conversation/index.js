@@ -258,19 +258,45 @@ ${soundboard.getPromptSupplement()}
             // Let's simple-track: Add her response to history.
 
             // Clean response for storage (strip tags)
-            const cleanResponse = response.replace(/\[.*?\]/g, '').trim();
+            // UPDATE: We want to save RAW response to history so she remembers actions (like [dm])
+            // const cleanResponse = response.replace(/\[.*?\]/g, '').trim(); 
+            // We still calculate cleanResponse for learning? 
+            // Actually, learnFromInteraction takes (userId, userText, aiText, history, thoughts).
+            // We can derive cleanText from the parser result.
+
+            const parser = require('../../core/ai/parser');
+            // We parse later in the function, but need it here for learning/clean text?
+            // Let's parse early.
+
+            // Note: We duplicate parse logic if we do it here and below?
+            // Let's just use the 'response' for history.
 
             // If we haven't added the user message yet (passive wake-up), add it now effectively as context
             if (!isDirect) {
                 history.add(context.userId, 'user', text, username);
             }
 
-            // Learn
-            const h = history.get(context.userId);
-            memory.learnFromInteraction(context.userId, text, cleanResponse, h);
+            // Learn (We need parsed thoughts and clean text)
+            // We will parse properly in the Standard Processing block, but we need to Learn NOW?
+            // Or can we move Learning to after parsing?
+            // The code structure executes "Standard Processing" at line 298.
+            // Let's defer learning/history update until we have parsed?
+            // But we need to update history BEFORE generating the NEXT response if we were in a loop (not applicable here).
+            // Actually, let's just do a quick parse or move the logic.
+            // Moving the logic is safer to avoid double parsing.
 
-            // Add Assistant Response
-            history.add(context.userId, 'assistant', cleanResponse, 'Mina');
+            // Let's just save RAW response here.
+            history.add(context.userId, 'assistant', response, 'Mina');
+
+            // For learning, we need clean text.
+            const tempParsed = parser.parseResponse(response);
+            memory.learnFromInteraction(
+                context.userId,
+                text,
+                tempParsed.spokenText,
+                history.get(context.userId),
+                tempParsed.thoughts
+            );
         }
 
         // FEATURE: Hot Thread Mode
@@ -296,45 +322,62 @@ ${soundboard.getPromptSupplement()}
         }
 
         // Standard Processing (Status, Tilt, Anim, Sound)
-        let spokenResponse = response.replace(/\*/g, ''); // Strip asterisks immediately
+        const parser = require('../../core/ai/parser');
+        const parsed = parser.parseResponse(response);
 
-        // Parse Status
-        const statusRegex = /\[status:\s*"?(.*?)"?\]/i;
-        const statusMatch = spokenResponse.match(statusRegex);
-        if (statusMatch) {
-            spokenResponse = spokenResponse.replace(statusRegex, '').trim();
+        let spokenResponse = parsed.spokenText;
+
+        // Log Thoughts
+        if (parsed.thoughts) {
+            console.log(`\n\x1b[36m[AutoConvo Thoughts]\x1b[0m\n${parsed.thoughts}\n`);
         }
 
-        // Parse Tilt
-        const tiltRegex = /\[tilt:\s*([+-]?\d+)\]/i;
-        const tiltMatch = spokenResponse.match(tiltRegex);
-        if (tiltMatch) {
-            const delta = parseInt(tiltMatch[1], 10);
-            if (!isNaN(delta)) mood.modifyTilt(delta);
-            spokenResponse = spokenResponse.replace(tiltRegex, '').trim();
+        // Apply Mood Tilt
+        if (parsed.actions.tilt !== null) {
+            mood.modifyTilt(parsed.actions.tilt);
         }
 
-        // Parse Animations
-        const animRegex = /\[anim:\s*(.*?)\]/gi;
-        const animMatches = [...spokenResponse.matchAll(animRegex)];
-        if (animMatches.length > 0) {
-            animMatches.forEach((m, index) => {
-                const animName = m[1].trim();
+        // Handle Animations
+        if (parsed.actions.anims.length > 0) {
+            parsed.actions.anims.forEach((animName, index) => {
                 setTimeout(() => {
                     if (satellite && satellite.playGesture) satellite.playGesture(null, animName);
                     else if (satellite && satellite.broadcast) satellite.broadcast('gesture', { type: animName, duration: 4.0 });
                 }, index * 2500);
             });
-            spokenResponse = spokenResponse.replace(animRegex, '').trim();
+        }
+
+        // Handle DM (New Feature for AutoConvo)
+        if (parsed.actions.dm) {
+            const { targetName, messageContent } = parsed.actions.dm;
+            console.log(`[AutoConvo] AI wants to DM "${targetName}": "${messageContent}"`);
+            const targetUser = memory.findUserByName(targetName);
+            if (targetUser) {
+                // We need to actually SEND the DM here because AutoConvo doesn't return an ActionPlan like handleUtterance
+                // It executes directly.
+                const discordClient = require('../../integrations/discord/client');
+                // Assuming we can get client or use a utility. 
+                // Actually, handleUtterance returns an ActionPlan. AutoConvo executes.
+                // We need a way to send DM. 
+                // Let's check if we have a DM utility. The pipeline usually lets the 'voice/message' handler do it.
+                // Here we are "Acting".
+                try {
+                    // We need to fetch the user from Discord client to send DM
+                    const user = await discordClient.client.users.fetch(targetUser.id);
+                    if (user) await user.send(messageContent);
+                } catch (e) { console.error("[AutoConvo] Failed to send DM:", e); }
+            } else {
+                console.warn(`[AutoConvo] Could not find user "${targetName}" for DM.`);
+            }
         }
 
         // Parse Soundboard
         let sequence = [];
         if (type === 'text') {
-            spokenResponse = spokenResponse.replace(/\[sound:\s*(.*?)\]/gi, '').trim();
+            spokenResponse = spokenResponse.replace(/\[sound:\s*(.*?)\]/gi, '').replace(/\[\/sound\]/gi, '').trim();
         } else {
             sequence = soundboard.parseMixedAudio(spokenResponse);
-            spokenResponse = spokenResponse.replace(/\[sound:\s*(.*?)\]/gi, '').trim();
+            spokenResponse = spokenResponse.replace(/\[sound:\s*(.*?)\]/gi, '').replace(/\[\/sound\]/gi, '').trim();
         }
 
         // Execution
