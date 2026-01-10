@@ -16,3 +16,4 @@
 * [[Database Schema|Database]]
 * [[Deployment]]
 * [[Tool Calling]]
+  * [[Tools/Smart-Search|Smart Search]]

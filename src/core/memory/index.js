@@ -5,7 +5,12 @@ const vector = require('./vector');
 const gamingStore = require('../../features/gaming/store');
 
 const MEMORY_FILE = path.join(process.cwd(), 'data', 'memory.json');
-const MEMORY_LOG_FILE = path.join(process.cwd(), 'data', 'memory.log');
+const MEMORY_LOG_FILE = path.join(process.cwd(), 'data', 'logs', 'memory.log');
+
+// Ensure log dir exists
+if (!fs.existsSync(path.join(process.cwd(), 'data', 'logs'))) {
+    fs.mkdirSync(path.join(process.cwd(), 'data', 'logs'), { recursive: true });
+}
 
 // Ensure data dir exists
 if (!fs.existsSync(path.join(process.cwd(), 'data'))) {
