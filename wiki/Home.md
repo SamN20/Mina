@@ -16,6 +16,7 @@ This documentation serves as the primary reference for the architecture, deploym
 *   **[[Voice Pipeline]]**: End-to-end data flow analysis of audio ingestion, transcription, and output.
 *   **[[Auto Conversation]]**: Logic behind passive voice and text participation.
 *   **[[Memory System]]**: Deep dive into vector embeddings and the learning loop.
+*   **[[Tool Calling]]**: How to add new tools and execute them.
 *   **[[Development]]**: Guidelines for contributing code, adding features, and testing.
 *   **[[Database Schema|Database]]**: Structure of the local file-based storage systems (Memory, Analytics).
 *   **[[Satellite Client|Satellite]]**: Protocol and usage for the external Python desktop client.

@@ -3,6 +3,10 @@ const path = require('path');
 const storage = require('../../core/storage');
 const mood = require('../../features/mood');
 const vrmAnimation = require('../../core/vrm/animation');
+const toolRegistry = require('../../core/ai/toolRegistry');
+
+// Initialize tools
+toolRegistry.loadTools();
 
 const FALLBACK_MODEL = 'meta-llama/llama-3.3-70b-instruct:free';
 
@@ -11,7 +15,13 @@ const FALLBACK_MODEL = 'meta-llama/llama-3.3-70b-instruct:free';
 
 async function generateResponse(prompt, history = [], options = {}) {
     // Default options
-    const { forceThoughts = true } = options;
+    const { forceThoughts = true, depth = 0 } = options;
+
+    // Safety: Prevent infinite loops
+    if (depth > 5) {
+        console.warn("[OpenRouter] Max recursion depth reached.");
+        return "I'm executing too many actions at once. Let me stop here.";
+    }
 
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) {
@@ -187,20 +197,29 @@ ${tagRules}
 
     for (const model of modelsToTry) {
         try {
-            console.log(`[OpenRouter] Thinking with ${model}... (History: ${history.length} items)`);
+            const requestBody = {
+                "model": model,
+                "messages": messages
+            };
 
+            // Inject Tools if available
+            const tools = toolRegistry.getToolSchemas();
+            if (tools.length > 0) {
+                requestBody.tools = tools;
+                requestBody.tool_choice = "auto";
+            }
+
+            // 1st Request
+            console.log(`[OpenRouter] Thinking with ${model}... (History: ${history.length} items)`);
             const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
                 method: "POST",
                 headers: {
                     "Authorization": `Bearer ${apiKey}`,
                     "Content-Type": "application/json",
-                    "HTTP-Referer": "https://github.com/Antigravity",
-                    "X-Title": "Discord Transcribe Bot",
+                    "HTTP-Referer": "https://github.com/SamN20/Mina",
+                    "X-Title": "Mina",
                 },
-                body: JSON.stringify({
-                    "model": model,
-                    "messages": messages
-                })
+                body: JSON.stringify(requestBody)
             });
 
             if (!response.ok) {
@@ -210,6 +229,81 @@ ${tagRules}
 
             const video = await response.json();
             let text = video.choices[0]?.message?.content;
+            const message = video.choices[0]?.message;
+
+            // Handle Tool Calls
+            if (message && message.tool_calls) {
+                console.log(`[OpenRouter] Tool calls detected: ${message.tool_calls.length}`);
+
+                // Add the assistant's request to history so it knows it asked
+                messages.push(message);
+
+                // Execute all tools in parallel
+                const toolResults = await Promise.all(message.tool_calls.map(async (call) => {
+                    try {
+                        let args = {};
+                        try {
+                            args = JSON.parse(call.function.arguments);
+                        } catch (e) {
+                            console.error("[OpenRouter] Failed to parse tool arguments", e);
+                        }
+                        const result = await toolRegistry.executeTool(call.function.name, args);
+
+                        return {
+                            tool_call_id: call.id,
+                            role: "tool",
+                            name: call.function.name,
+                            content: result
+                        };
+                    } catch (e) {
+                        console.error(`[OpenRouter] Failed to execute tool ${call.function.name}:`, e);
+                        return {
+                            tool_call_id: call.id,
+                            role: "tool",
+                            name: call.function.name,
+                            content: JSON.stringify({ error: "Execution failed" })
+                        };
+                    }
+                }));
+
+                // Add all results to messages
+                messages.push(...toolResults);
+
+                console.log(`[OpenRouter] Tools executed. Sending results back to model...`);
+
+                // 2nd Request (with tool results)
+                const followUpResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${apiKey}`,
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": "https://github.com/SamN20/Mina",
+                        "X-Title": "Mina",
+                    },
+                    body: JSON.stringify({
+                        "model": model,
+                        "messages": messages,
+                        "tools": tools,
+                        "tool_choice": "auto"
+                    })
+                });
+
+                if (!followUpResponse.ok) {
+                    const errorText = await followUpResponse.text();
+                    console.error("Follow-up request failed:", errorText);
+                    // fallback to what we have? or continue?
+                } else {
+                    const followUpData = await followUpResponse.json();
+                    let followUpText = followUpData.choices?.[0]?.message?.content;
+
+                    if (followUpText) {
+                        text = followUpText;
+                    } else if (followUpData.choices?.[0]?.message?.tool_calls) {
+                        // Potential loop. For now, stop.
+                        text = "I've done the calculations, but I'm getting a bit carried away. Let's pause.";
+                    }
+                }
+            }
 
             if (text) {
                 // Cleanup: Strip potential XML hallucinations if it leaks
