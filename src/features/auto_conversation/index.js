@@ -383,9 +383,21 @@ ${soundboard.getPromptSupplement()}
         // Execution
         if (type === 'text' && channel) {
             await channel.sendTyping();
-            setTimeout(() => {
-                channel.send(spokenResponse);
+
+            // Wait a bit then send (simulate typing)
+            setTimeout(async () => { // Changed to async to allow await channel.send
+                // Safety Check: Do not send empty messages
+                if (!spokenResponse || spokenResponse.length === 0) {
+                    console.warn("[AutoConvo] Prevented empty message send (likely pure thought output).");
+                    return;
+                }
+                try {
+                    await channel.send(spokenResponse);
+                } catch (err) {
+                    console.error("Failed to send message:", err);
+                }
             }, 2000);
+
         } else {
             if (sequence.length > 0) {
                 for (const item of sequence) {
@@ -396,7 +408,11 @@ ${soundboard.getPromptSupplement()}
                     }
                 }
             } else {
-                await audio.speak(guildId, spokenResponse);
+                if (spokenResponse && spokenResponse.length > 0) {
+                    await audio.speak(guildId, spokenResponse);
+                } else {
+                    console.warn("[AutoConvo] Prevented empty speak (likely pure thought output).");
+                }
             }
         }
 

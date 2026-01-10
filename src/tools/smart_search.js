@@ -11,7 +11,19 @@ async function fetchPageText(url) {
     try {
         const userAgent = new UserAgent();
         const response = await axios.get(url, {
-            headers: { 'User-Agent': userAgent.toString() },
+            headers: {
+                'User-Agent': userAgent.toString(),
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-User': '?1',
+                'Cache-Control': 'max-age=0'
+            },
             timeout: 5000,
             responseType: 'text' // Ensure we get text/html
         });
@@ -129,25 +141,37 @@ module.exports = {
             const results = await searchSearXNG(query);
             logDetails += `\nFound ${results.length} search results via SearXNG.`;
 
-            for (const res of results) {
-                sources.push(res);
-                logDetails += `\n- [${res.title}](${res.url})`;
-            }
+            // 1. Fetch Pages (with fallback)
+            // Re-initialize contexts and sources for this block to ensure clean state
+            contexts = [];
+            sources = [];
 
-            // Fetch top 2 pages
-            const pagesToFetch = results.slice(0, 2);
-            for (const page of pagesToFetch) {
-                const text = await fetchPageText(page.url);
-                if (text) {
-                    contexts.push(text);
-                    logDetails += `\nScraped: ${page.url} (${text.length} chars)`;
+            for (const result of results.slice(0, 3)) { // Limit to top 3
+                if (!result.url) continue;
+
+                const url = result.url;
+                let pageText = await fetchPageText(url);
+
+                if (!pageText && result.content) {
+                    console.log(`[SmartSearch] Scraping failed for ${url}, falling back to snippet.`);
+                    pageText = "Snippet: " + result.content;
+                }
+
+                if (pageText) {
+                    // If we have text (scraped or snippet), use it
+                    contexts.push(pageText);
+                    sources.push({ title: result.title, url: result.url });
+                    logDetails += `\nScraped: ${url} (${pageText.length} chars)`;
+                } else {
+                    logDetails += `\nFailed to scrape: ${url}`;
                 }
             }
-        }
 
-        if (contexts.length === 0) {
-            logToSearchFile("SEARCH FAILED", logDetails + "\nResult: Failed to retrieve content.");
-            return "Failed to retrieve any information from the web.";
+            if (contexts.length === 0) {
+                const errorMsg = "Failed to retrieve content from any source.";
+                logToSearchFile("SEARCH FAILED", logDetails + "\nResult: " + errorMsg);
+                return JSON.stringify({ error: errorMsg });
+            }
         }
 
         // 2. Run Local QA
