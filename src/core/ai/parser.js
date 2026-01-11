@@ -19,7 +19,7 @@ function parseResponse(rawResponse) {
     if (!spokenText) return { spokenText, thoughts, actions };
 
     // 1. Extract Thoughts
-    const thoughtRegex = /<thought>([\s\S]*?)<\/thought>/i;
+    const thoughtRegex = /<thought>([\s\S]*?)<\/\s*thought\s*>/i;
     const thoughtMatch = spokenText.match(thoughtRegex);
     if (thoughtMatch) {
         thoughts = thoughtMatch[1].trim();

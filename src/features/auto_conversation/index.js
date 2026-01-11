@@ -232,7 +232,11 @@ ${soundboard.getPromptSupplement()}
             history.add(context.userId, 'user', text, username);
         }
 
-        const response = await ai.generateResponse(prompt);
+        // Pass context info (voice/text, guildId) to allow feedback for tools
+        const response = await ai.generateResponse(prompt, [], {
+            contextType: type, // 'voice' or 'text'
+            guildId: guildId
+        });
 
         if (!response || (response.includes('SILENT') && !isDirect) || response.length < 2) {
             console.log(`[AutoConvo] AI decided to stay silent.`);

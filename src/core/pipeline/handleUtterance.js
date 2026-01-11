@@ -164,6 +164,8 @@ async function handleUtterance(text, context) {
         const sequence = soundboard.parseMixedAudio(spokenResponse);
 
         // Strip tags for clean text for memory/TTS
+        // Strip tags/thoughts for clean text for memory/TTS
+        spokenResponse = spokenResponse.replace(/<thought>[\s\S]*?<\/thought>/gi, '').trim();
         spokenResponse = spokenResponse.replace(/\[sound:\s*(.*?)\]/gi, '').replace(/\[\/sound\]/gi, '').trim();
 
         // Memory learn

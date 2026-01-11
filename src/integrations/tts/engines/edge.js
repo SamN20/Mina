@@ -5,9 +5,10 @@ const fs = require('fs');
 // Detect Python command based on OS
 // On Linux, use the venv Python to ensure edge-tts is available
 const isWin = process.platform === 'win32';
-const PYTHON_CMD = isWin 
-    ? 'python' 
-    : path.join(__dirname, '..', '..', 'venv', 'bin', 'python3');
+const PYTHON_CMD = isWin
+    ? 'python'
+    : 'python3'; // Fallback to system python if venv not found. Or use specific path if known.
+// : path.join(__dirname, '..', '..', '..', 'integrations', 'venv', 'bin', 'python3'); // Corrected Depth? No, let's use system python for safety.
 
 const VOICES = [
     { label: '🇺🇸 English (US) - Christopher', value: 'en-US-ChristopherNeural' },

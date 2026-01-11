@@ -28,7 +28,16 @@ async function fetchPageText(url) {
             responseType: 'text' // Ensure we get text/html
         });
 
-        const dom = new JSDOM(response.data, { url });
+        const virtualConsole = new JSDOM.VirtualConsole();
+        virtualConsole.on("error", () => {
+            // No-op to skip console errors
+        });
+        virtualConsole.on("jsdomError", () => {
+            // No-op to skip CSS parsing errors
+        });
+        virtualConsole.sendTo(console, { omitJSDOMErrors: true });
+
+        const dom = new JSDOM(response.data, { url, virtualConsole });
         const reader = new Readability(dom.window.document);
         const article = reader.parse();
 

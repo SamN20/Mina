@@ -4,6 +4,7 @@ const storage = require('../../core/storage');
 const mood = require('../../features/mood');
 const vrmAnimation = require('../../core/vrm/animation');
 const toolRegistry = require('../../core/ai/toolRegistry');
+const audio = require('../discord/audio');
 
 // Initialize tools
 toolRegistry.loadTools();
@@ -116,7 +117,7 @@ Mood: ${currentMood.description} (Tilt: ${currentMood.level}%)
     let rules = `
 [OPERATIONAL RULES]
 1. **Response Format**: 
-   - Start with a SINGLE <thought>...</thought> block to plan.
+   - Start with a SINGLE <thought>...</thought> block to plan. Only ever provide one set of thoughts.
    - Then provide your spoken response.
    - DO NOT output <msg> tags or timestamps in your response.
    - DO NOT use script format like "[12:00] (Mina): ...". Just speak.
@@ -128,8 +129,11 @@ ${tagRules}
 
 3. **History Protocol**:
    - History is provided in <msg> tags. 
-   - PREVIOUS MESSAGES MAY CONTAIN FORMAT ERRORS. DO NOT COPY THEM.
+   - PREVIOUS MESSAGES MAY CONTAIN FORMAT ERRORS. DO NOT COPY THEM. Always go by these rules.
    - Follow THESE rules, not the style of old messages.
+
+4. **Function/Tool Calls**:
+   - You can call functions/tools if needed. 
 `;
 
     // Combine System Prompt
@@ -236,35 +240,59 @@ ${tagRules}
                 console.log(`[OpenRouter] Tool calls detected: ${message.tool_calls.length}`);
 
                 // Add the assistant's request to history so it knows it asked
-                messages.push(message);
+                // --- 5. Tool Handling ---
+                // FIX: 'data' was undefined. The variable is 'video' but we have 'message' alias.
+                const toolCalls = message.tool_calls;
+                console.log(`[OpenRouter] Tool calls detected: ${toolCalls.length}`);
 
-                // Execute all tools in parallel
-                const toolResults = await Promise.all(message.tool_calls.map(async (call) => {
-                    try {
-                        let args = {};
-                        try {
-                            args = JSON.parse(call.function.arguments);
-                        } catch (e) {
-                            console.error("[OpenRouter] Failed to parse tool arguments", e);
-                        }
-                        const result = await toolRegistry.executeTool(call.function.name, args);
-
-                        return {
-                            tool_call_id: call.id,
-                            role: "tool",
-                            name: call.function.name,
-                            content: result
-                        };
-                    } catch (e) {
-                        console.error(`[OpenRouter] Failed to execute tool ${call.function.name}:`, e);
-                        return {
-                            tool_call_id: call.id,
-                            role: "tool",
-                            name: call.function.name,
-                            content: JSON.stringify({ error: "Execution failed" })
-                        };
+                // Voice Feedback for Search (during voice calls)
+                if (options.contextType === 'voice' && options.guildId) {
+                    const hasSearch = toolCalls.some(tc => tc.function.name === 'smart_search');
+                    if (hasSearch) {
+                        const phrases = [
+                            "One second, let me check that.",
+                            "Searching for you.",
+                            "Let me look that up real quick.",
+                            "Checking the web."
+                        ];
+                        const randomPhrase = phrases[Math.floor(Math.random() * phrases.length)];
+                        // Fire and forget (don't await, let tool run in parallel or concurrent)
+                        audio.speak(options.guildId, randomPhrase).catch(err => console.error("[Audio] Failed to speak search ack:", err));
                     }
-                }));
+                }
+
+                messages.push(message); // Add the assistant's tool call request to messages.
+
+                const toolResults = [];
+                for (const toolCall of toolCalls) {
+                    const fnName = toolCall.function.name;
+                    let fnArgs = {};
+                    try {
+                        fnArgs = JSON.parse(toolCall.function.arguments);
+                    } catch (e) {
+                        console.error("[OpenRouter] Failed to parse tool arguments", e);
+                    }
+
+                    console.log(`[ToolRegistry] Executing ${fnName} with args:`, fnArgs);
+
+                    try {
+                        const result = await toolRegistry.executeTool(fnName, fnArgs);
+                        toolResults.push({
+                            tool_call_id: toolCall.id,
+                            role: "tool",
+                            name: fnName,
+                            content: result
+                        });
+                    } catch (err) {
+                        console.error(`[ToolRegistry] Error executing ${fnName}:`, err);
+                        toolResults.push({
+                            tool_call_id: toolCall.id,
+                            role: "tool",
+                            name: fnName,
+                            content: JSON.stringify({ error: err.message })
+                        });
+                    }
+                }
 
                 // Add all results to messages
                 messages.push(...toolResults);
@@ -309,6 +337,14 @@ ${tagRules}
                 // Cleanup: Strip potential XML hallucinations if it leaks
                 text = text.replace(/^<msg.*?>/i, '').replace(/<\/msg>$/i, '').trim();
 
+                // Cleanup: Strip Tool Artifacts (e.g. "[smart_search] {json}")
+                // Matches "[tool_name] {json}" or just bare JSON blocks containing "answer" or "context_excerpt"
+                text = text.replace(/\[\w+\]\s*\{[\s\S]*?"answer":[\s\S]*?\}/g, '');
+                text = text.replace(/^\s*\{[\s\S]*?"answer":[\s\S]*?\}/gm, '');
+
+                // Cleanup: Strip lines that look like tool calls "Let me search..." if followed by artifacts?
+                // Hard to do safely. Main issue is the JSON/Debug data.
+
                 // Legacy timestamp strip (Backup)
                 text = text.replace(/^\[\d{1,2}\/\d{1,2}\s\d{1,2}:\d{2}\]\s*(\(.*?\))?:?\s*/, '').trim();
 
@@ -333,8 +369,8 @@ async function callOpenRouter(model, messages, apiKey) {
             headers: {
                 "Authorization": `Bearer ${apiKey}`,
                 "Content-Type": "application/json",
-                "HTTP-Referer": "https://github.com/Antigravity",
-                "X-Title": "Discord Transcribe Bot",
+                "HTTP-Referer": "https://github.com/SamN20/Mina",
+                "X-Title": "Mina",
             },
             body: JSON.stringify({
                 "model": model,
