@@ -122,3 +122,11 @@ A personal notebook system.
 *   **Access**: Notes can be added, listed, or deleted via Slash Commands (`/note`) or Voice Commands ("Make a note...").
 *   **AI Integration**: The LLM can manage notes autonomously (e.g. "Write down that I need milk") via the `manage_notes` tool.
 
+
+## 14. Do Not Disturb (`src/features/dnd`)
+
+Allows distinct marking of voice channels as busy.
+
+### Functionality
+*   **Toggle**: User can add `[DND]` to channel name via voice.
+*   **Auto-Cleanup**: The tag is automatically removed when the enabling user leaves the channel.

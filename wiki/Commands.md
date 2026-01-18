@@ -52,6 +52,7 @@ Voice directives are natural language phrases processed by the NLU system. They 
 *   **Termination**: "Stop" / "Shut up"
 *   **Scheduling**: "Remind me to [Task] in [Time]"
 *   **Status**: "What time is it?", "What is the weather in [Location]?"
+*   **Privacy**: "Turn on/off Do Not Disturb" (Toggles [DND] channel tag)
 
 ### Interactions
 *   **Query**: "Who plays [Game]?" (Retrieves user list from memory)

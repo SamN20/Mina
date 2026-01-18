@@ -11,6 +11,7 @@ const reminders = require('./src/features/reminders/store');
 const scheduler = require('./src/features/reminders/scheduler');
 const intentClassifier = require('./src/core/nlu/classifier');
 const autoConversation = require('./src/features/auto_conversation');
+const dnd = require('./src/features/dnd');
 const gaming = require('./src/features/gaming');
 const reactions = require('./src/features/reactions');
 const analytics = require('./src/features/analytics');
@@ -278,6 +279,9 @@ client.on(Events.InteractionCreate, async interaction => {
 // Event: Voice State Update (Join/Leave Logging & Theme Songs)
 // Event: Voice State Update (Join/Leave Logging & Theme Songs)
 client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
+    // Check DND cleanup
+    await dnd.checkCleanup(oldState);
+
     const userId = newState.member.id;
     const guildId = newState.guild.id;
     const botChannelId = voiceHandler.getBotChannelId(guildId);
