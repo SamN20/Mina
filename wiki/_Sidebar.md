@@ -6,6 +6,9 @@
 * [[Features]]
 * [[Commands]]
 * [[Satellite Client|Satellite]]
+* [[Features/Notes]]
+* [[Features/Weather]]
+* [[Features/Reminders]]
 
 ### Development
 * [[Architecture]]

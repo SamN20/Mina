@@ -203,7 +203,10 @@ ${tagRules}
         try {
             const requestBody = {
                 "model": model,
-                "messages": messages
+                "messages": messages,
+                "reasoning": {
+                    "exclude": true
+                }
             };
 
             // Inject Tools if available
@@ -239,11 +242,8 @@ ${tagRules}
             if (message && message.tool_calls) {
                 console.log(`[OpenRouter] Tool calls detected: ${message.tool_calls.length}`);
 
-                // Add the assistant's request to history so it knows it asked
-                // --- 5. Tool Handling ---
-                // FIX: 'data' was undefined. The variable is 'video' but we have 'message' alias.
                 const toolCalls = message.tool_calls;
-                console.log(`[OpenRouter] Tool calls detected: ${toolCalls.length}`);
+                // Removed duplicate log
 
                 // Voice Feedback for Search (during voice calls)
                 if (options.contextType === 'voice' && options.guildId) {
@@ -276,7 +276,7 @@ ${tagRules}
                     console.log(`[ToolRegistry] Executing ${fnName} with args:`, fnArgs);
 
                     try {
-                        const result = await toolRegistry.executeTool(fnName, fnArgs);
+                        const result = await toolRegistry.executeTool(fnName, fnArgs, options);
                         toolResults.push({
                             tool_call_id: toolCall.id,
                             role: "tool",
@@ -312,7 +312,10 @@ ${tagRules}
                         "model": model,
                         "messages": messages,
                         "tools": tools,
-                        "tool_choice": "auto"
+                        "tool_choice": "auto",
+                        "reasoning": {
+                            "exclude": true
+                        }
                     })
                 });
 
@@ -334,6 +337,20 @@ ${tagRules}
             }
 
             if (text) {
+                // Cleanup: If there is text BEFORE the <thought> tag, warn/strip it.
+                // We want to keep only <thought>...</thought> [Tool Call] OR <thought>...</thought> Final Response
+                // But sometimes the AI says "Sure! <thought>..." which is bad for TTS if we want to hide thoughts.
+
+                const thoughtMatch = text.match(/<thought>[\s\S]*?<\/thought>/i);
+                if (thoughtMatch) {
+                    const thoughtIndex = text.indexOf(thoughtMatch[0]);
+                    if (thoughtIndex > 10) { // arbitrary buffer for whitespace
+                        console.warn("[OpenRouter] AI hallucinated text before thought tag. Stripping header.");
+                        // Keep everything starting from the thought tag
+                        text = text.substring(thoughtIndex);
+                    }
+                }
+
                 // Cleanup: Strip potential XML hallucinations if it leaks
                 text = text.replace(/^<msg.*?>/i, '').replace(/<\/msg>$/i, '').trim();
 
@@ -374,7 +391,10 @@ async function callOpenRouter(model, messages, apiKey) {
             },
             body: JSON.stringify({
                 "model": model,
-                "messages": messages
+                "messages": messages,
+                "reasoning": {
+                    "exclude": true
+                }
             })
         });
 

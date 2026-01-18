@@ -50,7 +50,7 @@ class ToolRegistry {
      * @param {Object} args - The arguments for the tool.
      * @returns {Promise<string>} The result of the tool execution (stringified).
      */
-    async executeTool(name, args) {
+    async executeTool(name, args, context = {}) {
         const tool = this.tools.get(name);
         if (!tool) {
             return JSON.stringify({ error: `Tool '${name}' not found` });
@@ -58,7 +58,8 @@ class ToolRegistry {
 
         try {
             console.log(`[ToolRegistry] Executing ${name} with args:`, args);
-            const result = await tool.execute(args);
+            // Pass context (userId, guildId) to the tool if it accepts it
+            const result = await tool.execute(args, context);
             // Ensure result is a string
             return typeof result === 'string' ? result : JSON.stringify(result);
         } catch (error) {

@@ -113,3 +113,12 @@ Annual or on-demand summary generation.
 *   **Aggregation**: Compiles data from `data/activity.json` and `data/memory.json`.
 *   **Report Generation**: Produces a narrative summary of the user's "Year in Review," highlighting most played games, top friends, and total talk time.
 
+## 13. Notes (`src/features/notes`)
+
+A personal notebook system.
+
+### Functionality
+*   **Storage**: Persists user notes to `data/notes.json` by User ID.
+*   **Access**: Notes can be added, listed, or deleted via Slash Commands (`/note`) or Voice Commands ("Make a note...").
+*   **AI Integration**: The LLM can manage notes autonomously (e.g. "Write down that I need milk") via the `manage_notes` tool.
+

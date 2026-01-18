@@ -87,8 +87,13 @@ async function handleUtterance(text, context) {
 
     // Get History Window
     const historyWindow = history.get(context.userId);
+    const options = {
+        userId: context.userId,
+        guildId: context.guildId,
+        contextType: 'voice' // Since handleUtterance is usually voice/pipeline
+    };
 
-    const response = await ai.generateResponse(fullPrompt, historyWindow);
+    const response = await ai.generateResponse(fullPrompt, historyWindow, options);
     console.log(`[AI] Response: "${response}"`);
 
 

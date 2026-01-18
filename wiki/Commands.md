@@ -27,6 +27,9 @@ Slash commands are executed within the Discord text interface. They require appr
 | `/download` | Exports the daily transcription log. | Everyone |
 | `/privacy` | Manages data retention policies. | Everyone |
 | `/toggleai` | Global switch for AI response generation. | Everyone |
+| `/note` | Save a new note. | Everyone |
+| `/notes` | List your saved notes. | Everyone |
+| `/delnote` | Delete a note by ID. | Everyone |
 
 ### Administration
 
