@@ -130,3 +130,35 @@ Allows distinct marking of voice channels as busy.
 ### Functionality
 *   **Toggle**: User can add `[DND]` to channel name via voice.
 *   **Auto-Cleanup**: The tag is automatically removed when the enabling user leaves the channel.
+
+## 15. Vision (`src/features/vision`)
+
+Enables Mina to "see" and understand images from Discord and satellite clients.
+
+### Functionality
+*   **Discord Image Analysis**: Automatically analyzes images posted in Discord channels or DMs
+*   **Slash Command `/look`**: Explicit image analysis with customizable prompts and modes
+*   **Vision Memory**: Stores short summaries of analyzed images in memory (Phase 1.5)
+*   **Satellite Vision**: Local computer vision via satellite clients (Phase 2)
+    *   Motion detection
+    *   Face presence/absence
+    *   Brightness detection
+    *   Idle detection
+    *   Screen capture and OCR
+*   **On-demand Vision**: Voice commands to request snapshots and analysis (Phase 3)
+    *   "What am I looking at?" - Webcam analysis
+    *   "What's on my screen?" - Screen analysis with OCR
+    *   "Read this error" - OCR text extraction
+*   **GUI Settings**: Configurable feature toggles, rate limits, and thresholds
+
+### Implementation
+*   **API**: `src/features/vision/api.js` - OpenRouter vision model integration
+*   **Tool**: `src/tools/vision_analyze.js` - LLM tool for image analysis
+*   **Commands**: `src/features/vision/commands.js` - Voice command handlers (Phase 3)
+*   **Memory**: `src/core/memory/index.js::addVisionMemory()` - Vision memory storage
+*   **Satellite**: `src/integrations/satellite/index.js` - Vision event handling
+*   **Client**: `satellite/advanced/vision_client.py` - Python vision satellite client
+*   **Settings**: `satellite/advanced/vision_settings.py` - Configuration management (Phase 3)
+*   **GUI**: `satellite/advanced/vision_settings_gui.py` - Settings interface (Phase 3)
+
+For detailed documentation, see [[Vision Features|Features/Vision]].

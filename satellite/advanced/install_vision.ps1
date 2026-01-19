@@ -1,4 +1,4 @@
-# Mina Satellite Installer (Windows)
+# Mina Vision Satellite Installer (Windows)
 # Automated installer with progress tracking and error recovery
 
 $ErrorActionPreference = "Stop"
@@ -17,8 +17,8 @@ Write-Host "    | |  | || || |\  |/ ___ \" -ForegroundColor Cyan
 Write-Host "    |_|  |_|___|_| \_/_/   \_\" -ForegroundColor Cyan
 Write-Host "  ================================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "         >> Satellite Client Installer <<" -ForegroundColor White
-Write-Host "      Control your PC with voice commands!" -ForegroundColor Gray
+Write-Host "         >> Vision Satellite Installer <<" -ForegroundColor White
+Write-Host "      Give Mina eyes to see your world!" -ForegroundColor Gray
 Write-Host ""
 Write-Host "  ------------------------------------------------" -ForegroundColor DarkGray
 Write-Host ""
@@ -27,8 +27,8 @@ Write-Host ""
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $SatelliteRoot = Split-Path -Parent $ScriptDir  # Go up to satellite folder (parent of advanced/)
 $IsInDownloads = $SatelliteRoot -match "\\Downloads\\?"
-$SuggestedPath = "$env:LOCALAPPDATA\Mina\Satellite"
-$VenvPath = Join-Path $SatelliteRoot "env"
+$SuggestedPath = "$env:LOCALAPPDATA\Mina\Vision"
+$VenvPath = Join-Path $SatelliteRoot "vision_env"
 $PythonExe = $null
 $TotalSteps = 5
 $CurrentStep = 0
@@ -71,7 +71,7 @@ function Check-InstallLocation {
         Write-Host "  ================================================" -ForegroundColor DarkGray
         Write-Warning "Installation from Downloads folder detected!"
         Write-Host ""
-        Write-Host "  It's recommended to install Mina Satellite to a permanent location." -ForegroundColor Yellow
+        Write-Host "  It's recommended to install Mina Vision to a permanent location." -ForegroundColor Yellow
         Write-Host "  Files in Downloads may be cleaned up automatically." -ForegroundColor Yellow
         Write-Host ""
         Write-Host "  Suggested location: " -NoNewline -ForegroundColor White
@@ -104,8 +104,8 @@ function Check-InstallLocation {
                     Copy-Item -Path "$SatelliteRoot\*" -Destination $SuggestedPath -Recurse -Force -ErrorAction Stop
                     
                     Write-Success "Files moved successfully"
-                    Write-Info "Please run Install.bat from the new location:"
-                    Write-Host "  $SuggestedPath\Install.bat" -ForegroundColor Cyan
+                    Write-Info "Please run Install Vision.bat from the new location:"
+                    Write-Host "  $SuggestedPath\Install Vision.bat" -ForegroundColor Cyan
                     Write-Host ""
                     Write-Host "Press any key to open the new location..." -ForegroundColor DarkGray
                     $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
@@ -209,11 +209,17 @@ function Install-Dependencies {
         @{Name="pillow"; Display="Icon rendering"}
     )
     
+    # Vision-specific packages (required)
+    $visionPackages = @(
+        @{Name="opencv-python"; Display="OpenCV for computer vision"},
+        @{Name="numpy"; Display="Numerical computing"},
+        @{Name="mediapipe"; Display="Face detection (MediaPipe)"}
+    )
+    
     # Optional packages (install best effort)
     $optionalPackages = @(
-        @{Name="pynput"; Display="Media control support"},
-        @{Name="pyautogui"; Display="Media control fallback"},
-        @{Name="winsdk"; Display="Windows Media API"}
+        @{Name="pynput"; Display="Idle detection support"},
+        @{Name="pyautogui"; Display="Screen capture support"}
     )
     
     Write-Host ""
@@ -224,6 +230,17 @@ function Install-Dependencies {
         if ($LASTEXITCODE -ne 0) {
             Write-Error "Failed to install $($pkg.Name) - this is required!"
             throw "Core dependency installation failed"
+        }
+    }
+    
+    Write-Host ""
+    Write-Info "Installing vision dependencies..."
+    foreach ($pkg in $visionPackages) {
+        Write-Info "Installing $($pkg.Display)..."
+        & $global:PipExe install $pkg.Name --quiet
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to install $($pkg.Name) - this is required for vision features!"
+            throw "Vision dependency installation failed"
         }
     }
     
@@ -245,21 +262,21 @@ function Create-Shortcut {
     
     try {
         $desktop = [Environment]::GetFolderPath("Desktop")
-        $shortcutPath = Join-Path $desktop "Mina Satellite.lnk"
-        $targetPath = Join-Path $SatelliteRoot "Start Satellite.bat"
+        $shortcutPath = Join-Path $desktop "Mina Vision Satellite.lnk"
+        $targetPath = Join-Path $SatelliteRoot "Start Vision.bat"
         
         $wshell = New-Object -ComObject WScript.Shell
         $shortcut = $wshell.CreateShortcut($shortcutPath)
         $shortcut.TargetPath = $targetPath
         $shortcut.WorkingDirectory = $SatelliteRoot
         $shortcut.IconLocation = "$targetPath,0"
-        $shortcut.Description = "Mina Satellite - Voice controlled media"
+        $shortcut.Description = "Mina Vision Satellite - Computer vision features"
         $shortcut.Save()
         
         Write-Success "Desktop shortcut created"
     } catch {
         Write-Warning "Could not create desktop shortcut"
-        Write-Info "You can manually run: Start Satellite.bat"
+        Write-Info "You can manually run: Start Vision.bat"
     }
 }
 
@@ -271,9 +288,15 @@ function Show-NextSteps {
     Write-Host "    >> Installation Successful! <<" -ForegroundColor Green
     Write-Host ""
     Write-Host "  Next steps:" -ForegroundColor White
-    Write-Host "    1. Double-click the 'Mina Satellite' icon on your desktop" -ForegroundColor Gray
+    Write-Host "    1. Double-click the 'Mina Vision Satellite' icon on your desktop" -ForegroundColor Gray
     Write-Host "    2. Enter your Discord User ID and server details" -ForegroundColor Gray
-    Write-Host "    3. Start using voice commands through Mina!" -ForegroundColor Gray
+    Write-Host "    3. Grant camera permissions when prompted" -ForegroundColor Gray
+    Write-Host "    4. Mina will now be able to see your world!" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  Privacy Note:" -ForegroundColor White
+    Write-Host "    - Vision processing happens locally on your PC" -ForegroundColor Gray
+    Write-Host "    - Only events (motion, faces) are sent to Mina" -ForegroundColor Gray
+    Write-Host "    - Images are only sent when explicitly requested" -ForegroundColor Gray
     Write-Host ""
     Write-Host "  Need help?" -ForegroundColor White
     Write-Host "    - Read README.md for troubleshooting" -ForegroundColor Gray
@@ -305,6 +328,7 @@ try {
     Write-Host "    - Python not installed or not in PATH" -ForegroundColor Gray
     Write-Host "    - Antivirus blocking installation" -ForegroundColor Gray
     Write-Host "    - No internet connection" -ForegroundColor Gray
+    Write-Host "    - Camera not available (check permissions)" -ForegroundColor Gray
     Write-Host ""
     Write-Info "For help, check README.md or ask in Discord"
     Write-Host ""

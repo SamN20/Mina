@@ -11,6 +11,7 @@ const history = require('../../core/history');
 const { ActionType } = require('../../core/types');
 const soundboard = require('../soundboard/utils');
 const usage = require('./usage');
+const vision = require('../vision/api');
 
 // Configuration
 const BUFFER_SIZE = 15; // Keep last 15 lines
@@ -40,6 +41,24 @@ async function processUtterance(text, context) {
 
     // Use channelId as key for text channels, guildId for voice (to span across re-joins)
     const key = channelId || guildId;
+
+    // FEATURE: Vision Integration
+    // If message has image, analyze it and append to text
+    if (context.message && context.message.attachments.size > 0) {
+        const firstAttachment = context.message.attachments.first();
+        if (firstAttachment.contentType && firstAttachment.contentType.startsWith('image/')) {
+            console.log(`[AutoConvo] Image detected in ${key}. Analyzing...`);
+            const description = await vision.analyzeImage(firstAttachment.url); // Default describe mode
+            text += `\n[Image Attachment: ${description}]`;
+            // Phase 1.5: Store vision memory
+            if (context.userId) {
+                const memory = require('../../core/memory');
+                const profile = memory.getProfileData(context.userId);
+                const displayName = profile.displayName || username;
+                await vision.storeVisionMemory(context.userId, firstAttachment.url, description, displayName);
+            }
+        }
+    }
 
     // 1. Add to Buffer
     if (!conversationBuffers.has(key)) {

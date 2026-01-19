@@ -1,10 +1,31 @@
 const { Server } = require("socket.io");
 const { match } = require("assert");
+const fs = require('fs');
+const path = require('path');
 
 let io;
 const activeSatellites = new Map(); // userId -> socketId
+const satelliteCapabilities = new Map(); // userId -> { capabilities: [] }
 const pendingQueries = new Map(); // requestId -> { resolve, timeout }
 const crypto = require('crypto');
+
+// Vision logging setup
+const VISION_LOG_FILE = path.join(process.cwd(), 'data', 'logs', 'vision.log');
+
+// Ensure log dir exists
+if (!fs.existsSync(path.join(process.cwd(), 'data', 'logs'))) {
+    fs.mkdirSync(path.join(process.cwd(), 'data', 'logs'), { recursive: true });
+}
+
+function logVisionEvent(header, details) {
+    const timestamp = new Date().toISOString();
+    const entry = `[${timestamp}] ${header} ${details ? JSON.stringify(details, null, 2) : ''}\n`;
+    try {
+        fs.appendFileSync(VISION_LOG_FILE, entry, 'utf8');
+    } catch (e) {
+        console.error("Failed to write to vision log:", e);
+    }
+}
 
 function init(httpServer) {
     io = new Server(httpServer, {
@@ -20,7 +41,7 @@ function init(httpServer) {
         console.log(`[Satellite] New connection: ${socket.id}`);
 
         socket.on("register", (data) => {
-            const { userId, token } = data;
+            const { userId, token, capabilities } = data;
 
             // Simple Token Auth (Check against env var)
             if (token !== process.env.SATELLITE_TOKEN) {
@@ -32,6 +53,15 @@ function init(httpServer) {
 
             console.log(`[Satellite] User ${userId} registered on ${socket.id}`);
             activeSatellites.set(userId, socket.id);
+            
+            // Phase 2: Store capabilities (vision, media, etc.)
+            if (capabilities && Array.isArray(capabilities)) {
+                satelliteCapabilities.set(userId, { capabilities });
+                console.log(`[Satellite] Capabilities for ${userId}: ${capabilities.join(', ')}`);
+            } else {
+                satelliteCapabilities.set(userId, { capabilities: ['media'] }); // Default
+            }
+            
             socket.emit("registered", "Connected to Mina Satellite Network");
         });
 
@@ -46,11 +76,43 @@ function init(httpServer) {
             }
         });
 
+        // Phase 2: Handle Vision Snapshot Responses
+        socket.on("vision_snapshot_response", (data) => {
+            const { requestId, snapshotType, imageData } = data;
+            if (pendingQueries.has(requestId)) {
+                const { resolve, timeout } = pendingQueries.get(requestId);
+                clearTimeout(timeout);
+                pendingQueries.delete(requestId);
+                resolve({ snapshotType, imageData });
+            }
+        });
+
+        // Phase 2: Vision Event Handlers
+        socket.on("vision_event", (data) => {
+            const { userId, eventType, eventData } = data;
+            // Log to vision.log instead of bot.log
+            logVisionEvent(`[Satellite Vision] Event from ${userId}: ${eventType}`, eventData);
+            
+            // Handle vision events (motion, face detection, etc.)
+            // For now, just log. In Phase 3+, we'll integrate with Mina's pipeline
+            handleVisionEvent(userId, eventType, eventData);
+        });
+
+        socket.on("vision_snapshot", (data) => {
+            const { userId, snapshotType, imageData } = data;
+            logVisionEvent(`[Satellite Vision] Snapshot from ${userId}: ${snapshotType}`, { size: imageData?.length || 0 });
+            
+            // Handle snapshot uploads (webcam/screen)
+            // For Phase 2, we just acknowledge. Phase 3+ will process with OpenRouter
+            handleVisionSnapshot(userId, snapshotType, imageData);
+        });
+
         socket.on("disconnect", () => {
             // Remove user from map
             for (const [uid, sid] of activeSatellites.entries()) {
                 if (sid === socket.id) {
                     activeSatellites.delete(uid);
+                    satelliteCapabilities.delete(uid);
                     console.log(`[Satellite] User ${uid} disconnected`);
                     break;
                 }
@@ -231,6 +293,92 @@ function setSpeaking(speaking) {
     return false;
 }
 
+// --- Phase 2: Vision Event Handlers ---
+
+/**
+ * Handle vision events from satellite clients
+ * @param {string} userId - User ID
+ * @param {string} eventType - Event type (motion_detected, face_present, etc.)
+ * @param {object} eventData - Event data
+ */
+function handleVisionEvent(userId, eventType, eventData) {
+    // Phase 2: Just log events. Phase 3+ will integrate with Mina's pipeline
+    logVisionEvent(`[Vision Event] ${userId}: ${eventType}`, eventData);
+    
+    // Store event in a simple log or queue for future processing
+    // For now, we just acknowledge receipt
+}
+
+/**
+ * Handle vision snapshot uploads
+ * @param {string} userId - User ID
+ * @param {string} snapshotType - 'webcam' or 'screen'
+ * @param {string} imageData - Base64 encoded image or URL
+ */
+function handleVisionSnapshot(userId, snapshotType, imageData) {
+    // Phase 2: Just acknowledge. Phase 3+ will process with OpenRouter vision model
+    logVisionEvent(`[Vision Snapshot] ${userId}: ${snapshotType} snapshot received`, { size: imageData?.length || 0 });
+    
+    // Acknowledge receipt
+    const socketId = activeSatellites.get(userId);
+    if (socketId && io) {
+        io.to(socketId).emit("vision_snapshot_ack", { 
+            received: true, 
+            timestamp: Date.now() 
+        });
+    }
+}
+
+/**
+ * Request a vision snapshot from satellite
+ * @param {string} userId - User ID
+ * @param {string} snapshotType - 'webcam' or 'screen'
+ * @returns {Promise<object|null>} Snapshot data or null if failed
+ */
+function requestVisionSnapshot(userId, snapshotType, includeOCR = false) {
+    return new Promise((resolve) => {
+        const socketId = activeSatellites.get(userId);
+        if (!socketId) {
+            logVisionEvent(`[Satellite Vision] User ${userId} not connected`, null);
+            return resolve(null);
+        }
+
+        const capabilities = satelliteCapabilities.get(userId);
+        if (!capabilities || !capabilities.capabilities.includes('vision')) {
+            logVisionEvent(`[Satellite Vision] User ${userId} doesn't have vision capabilities`, null);
+            return resolve(null);
+        }
+
+        const requestId = crypto.randomUUID();
+        const timeout = setTimeout(() => {
+            if (pendingQueries.has(requestId)) {
+                pendingQueries.delete(requestId);
+                logVisionEvent(`[Satellite Vision] Snapshot request ${requestId} timed out`, null);
+                resolve(null);
+            }
+        }, 10000); // 10 second timeout for snapshots (OCR can take time)
+
+        pendingQueries.set(requestId, { resolve, timeout });
+
+        io.to(socketId).emit("vision_snapshot_request", { 
+            requestId, 
+            snapshotType,
+            includeOCR: includeOCR || snapshotType === 'screen'  // Always include OCR for screen
+        });
+        logVisionEvent(`[Satellite Vision] Requested ${snapshotType} snapshot from ${userId}${includeOCR ? ' (with OCR)' : ''}`, null);
+    });
+}
+
+/**
+ * Check if a satellite has vision capabilities
+ * @param {string} userId - User ID
+ * @returns {boolean}
+ */
+function hasVisionCapability(userId) {
+    const capabilities = satelliteCapabilities.get(userId);
+    return capabilities && capabilities.capabilities.includes('vision');
+}
+
 module.exports = { 
     init, 
     sendCommand, 
@@ -242,5 +390,10 @@ module.exports = {
     playEmote,
     setExpression,
     playPose,
-    setSpeaking
+    setSpeaking,
+    // Phase 2: Vision functions
+    handleVisionEvent,
+    handleVisionSnapshot,
+    requestVisionSnapshot,
+    hasVisionCapability
 };

@@ -1,1 +1,1 @@
-require('./soundboard'); require('./reminders'); require('./timers'); require('./music'); require('./summary'); require('./weather'); require('./auto_conversation'); require('./fun'); require('./dnd');
+require('./soundboard'); require('./reminders'); require('./timers'); require('./music'); require('./summary'); require('./weather'); require('./auto_conversation'); require('./fun'); require('./dnd'); require('./vision/commands');

@@ -2,6 +2,7 @@ const ai = require('../../integrations/ai');
 const memory = require('../memory');
 const history = require('../history');
 const soundboard = require('../../features/soundboard/utils');
+const vision = require('../../features/vision/api');
 
 // Admin IDs from env
 const ADMIN_IDS = (process.env.ADMIN_IDS || '478317556038369285').split(',');
@@ -10,9 +11,10 @@ const ADMIN_IDS = (process.env.ADMIN_IDS || '478317556038369285').split(',');
  * Handle a DM message
  * @param {string} text 
  * @param {import('discord.js').User} user 
+ * @param {import('discord.js').Message} [message] - Optional message object for attachments
  * @returns {Promise<string|null>} Response text or null if ignored
  */
-async function handleDM(text, user) {
+async function handleDM(text, user, message = null) {
     const userId = user.id;
     const username = user.username; // Or global name if available?
 
@@ -30,6 +32,18 @@ async function handleDM(text, user) {
     const displayName = profile.displayName || username;
 
     console.log(`[DM Pipeline] Handling DM from "${displayName}" (${username}): "${text}"`);
+
+    // FEATURE: Vision Integration
+    if (message && message.attachments.size > 0) {
+        const firstAttachment = message.attachments.first();
+        if (firstAttachment.contentType && firstAttachment.contentType.startsWith('image/')) {
+            console.log(`[DM Pipeline] Image detected. Analyzing...`);
+            const description = await vision.analyzeImage(firstAttachment.url);
+            text += `\n[Image Attachment: ${description}]`;
+            // Phase 1.5: Store vision memory
+            await vision.storeVisionMemory(userId, firstAttachment.url, description, displayName);
+        }
+    }
 
     // 2. Build Context
     // We reuse memory context logic

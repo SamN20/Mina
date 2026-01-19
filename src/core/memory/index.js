@@ -1,8 +1,18 @@
 const fs = require('fs');
 const path = require('path');
-const ai = require('../../integrations/ai');
+// Lazy-load AI to avoid circular dependency
+// const ai = require('../../integrations/ai');
 const vector = require('./vector');
 const gamingStore = require('../../features/gaming/store');
+
+// Lazy-load AI module to break circular dependency
+let ai = null;
+function getAI() {
+    if (!ai) {
+        ai = require('../../integrations/ai');
+    }
+    return ai;
+}
 
 const MEMORY_FILE = path.join(process.cwd(), 'data', 'memory.json');
 const MEMORY_LOG_FILE = path.join(process.cwd(), 'data', 'logs', 'memory.log');
@@ -465,7 +475,8 @@ Output Format:
   ]
 }
 `;
-        let output = await ai.generateResponse(extractionPrompt, [], {
+        const aiModule = getAI();
+        let output = await aiModule.generateResponse(extractionPrompt, [], {
             forceThoughts: false,
             systemInstruction: "You are a strict JSON data extractor. Output ONLY valid JSON."
         });
@@ -705,6 +716,53 @@ function isExpectingDM(userId) {
     return !!data.expectingDM;
 }
 
+/**
+ * Add a vision memory entry (Phase 1.5)
+ * Stores a short summary memory tagged as 'vision_discord'
+ * @param {string} userId - User ID
+ * @param {string} memoryText - The memory text to store
+ * @param {string} imageHash - Hash of the image for deduplication
+ * @returns {Promise<boolean>} True if memory was added, false if duplicate
+ */
+async function addVisionMemory(userId, memoryText, imageHash = null) {
+    try {
+        const profile = getProfileData(userId);
+        const existingMemories = profile.memories || [];
+        
+        // Check for duplicates
+        const duplicate = existingMemories.find(m => 
+            m.category === 'vision_discord' && 
+            (m.text === memoryText || (imageHash && m.metadata?.imageHash === imageHash))
+        );
+        
+        if (duplicate) {
+            console.log(`[Memory] Skipping duplicate vision memory for ${userId}`);
+            return false;
+        }
+        
+        // Generate embedding
+        const embedding = await vector.getEmbedding(memoryText);
+        
+        // Add memory entry
+        profile.memories.push({
+            text: memoryText,
+            category: 'vision_discord',
+            embedding: embedding,
+            timestamp: Date.now(),
+            metadata: imageHash ? { imageHash: imageHash, source: 'discord' } : { source: 'discord' }
+        });
+        
+        // Save
+        saveMemory();
+        logToMemoryFile("VISION MEMORY", `User: ${userId}\nAdded: "${memoryText}"`);
+        
+        return true;
+    } catch (error) {
+        console.error("[Memory] Failed to add vision memory:", error);
+        return false;
+    }
+}
+
 module.exports = {
     getProfileData,
     getContext,
@@ -714,5 +772,6 @@ module.exports = {
     searchMemories,
     findUserByName,
     setExpectingDM,
-    isExpectingDM
+    isExpectingDM,
+    addVisionMemory
 };

@@ -9,6 +9,7 @@
 * [[Features/Notes]]
 * [[Features/Weather]]
 * [[Features/Reminders]]
+* [[Features/Vision]]
 
 ### Development
 * [[Architecture]]

@@ -505,7 +505,8 @@ client.on(Events.MessageCreate, async message => {
                 channel: message.channel,
                 isDirect: isDirect, // FEATURE: Direct Mention Handling
                 userId: message.author.id,
-                replyContext: replyContext // FEATURE: Reply Context
+                replyContext: replyContext, // FEATURE: Reply Context
+                message: message // FEATURE: Vision
             });
         }
         return;
@@ -593,7 +594,7 @@ client.on(Events.MessageCreate, async message => {
 
     // 3. Default Chat (Conversation via handleDM)
     // If permission exists (or Admin), this generates a reply
-    const response = await handleDM(text, message.author);
+    const response = await handleDM(text, message.author, message);
     if (response) {
         await message.reply(response);
     } else {

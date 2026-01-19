@@ -59,11 +59,12 @@ class CommandRegistry {
      * @returns {Object|null} Matching command or null
      */
     findMatch(text, context) {
+        // First pass: Check pattern-based commands (more specific)
         for (const cmd of this.commands) {
             // Check if disabled
             if (this.disabledCommands.has(cmd.id)) continue;
 
-            // Check Patterns
+            // Check Patterns first (pattern-based commands are usually more specific)
             if (cmd.patterns) {
                 for (const pattern of cmd.patterns) {
                     const regex = new RegExp(pattern, 'i');
@@ -72,8 +73,14 @@ class CommandRegistry {
                     }
                 }
             }
+        }
+        
+        // Second pass: Check custom matchers (intent-based, less specific)
+        for (const cmd of this.commands) {
+            // Check if disabled
+            if (this.disabledCommands.has(cmd.id)) continue;
 
-            // Check Custom Matcher
+            // Check Custom Matcher (only if no patterns matched)
             if (cmd.matcher && cmd.matcher(text, context)) {
                 return { command: cmd, matches: null };
             }
