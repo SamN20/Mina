@@ -86,6 +86,13 @@ async function handleDM(text, user, message = null) {
     // Strip tags and use clean text
     let cleanResponse = parsed.spokenText;
 
+    // If response contains only internal thoughts or is empty after cleaning, do not send.
+    if (!cleanResponse || cleanResponse.trim().length === 0) {
+        console.log('[DM Pipeline] Response was empty after stripping thoughts/tags — not sending.');
+        // Still update history and learning as before, but return null to avoid posting to Discord.
+        return null;
+    }
+
     // 7. Update History (AI)
     // Save RAW response to maintain consistency
     history.add(userId, 'assistant', response, 'Mina');

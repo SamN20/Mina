@@ -18,13 +18,18 @@ function parseResponse(rawResponse) {
 
     if (!spokenText) return { spokenText, thoughts, actions };
 
-    // 1. Extract Thoughts
-    const thoughtRegex = /<thought>([\s\S]*?)<\/\s*thought\s*>/i;
+    // 1. Extract Thoughts (support multiple tag variants the model might emit)
+    // Matches: <thought>...</thought>, <thinking>...</thinking>, <thoughts>...</thoughts> (case-insensitive)
+    const thoughtRegex = /<\s*(thought|thinking|thoughts)[^>]*>([\s\S]*?)<\/\s*(thought|thinking|thoughts)\s*>/i;
     const thoughtMatch = spokenText.match(thoughtRegex);
     if (thoughtMatch) {
-        thoughts = thoughtMatch[1].trim();
-        spokenText = spokenText.replace(thoughtRegex, '').trim();
+        thoughts = (thoughtMatch[2] || '').trim();
+        // Remove all occurrences of thought-like tags
+        spokenText = spokenText.replace(/<\s*(thought|thinking|thoughts)[^>]*>[\s\S]*?<\/\s*(thought|thinking|thoughts)\s*>/gi, '').trim();
     }
+
+    // Also defensively strip any lingering standalone opening/closing thought-like tags
+    spokenText = spokenText.replace(/<\s*\/?\s*(thought|thinking|thoughts)[^>]*>/gi, '').trim();
 
     // 2. Cleanup Hallucinated Timestamps/Prefixes
     // e.g. "[1/6 10:00] (Mina): text" or "[User]: text" or "<msg ...> text"

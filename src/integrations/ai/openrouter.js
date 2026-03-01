@@ -132,8 +132,11 @@ ${tagRules}
    - PREVIOUS MESSAGES MAY CONTAIN FORMAT ERRORS. DO NOT COPY THEM. Always go by these rules.
    - Follow THESE rules, not the style of old messages.
 
-4. **Function/Tool Calls**:
-   - You can call functions/tools if needed. 
+    4. **Function/Tool Calls**:
+   - When you need external data or to perform an action, use the API's function-calling mechanism (the model's tools interface). DO NOT describe, simulate, or place the function call in plain text.
+    - Emit a structured tool call via the model (message.tool_calls) with the function name and JSON arguments. Do NOT include function call details inside the <thought> tag or normal response text.
+   - After calling a tool, wait for the system to run the tool and provide results, then continue your final spoken response using those results.
+   - If no tool is required, do not invent or suggest tool calls.
 `;
 
     // Combine System Prompt
@@ -141,7 +144,7 @@ ${tagRules}
 
     // --- 4. REMINDERS (Injected at end of System Prompt) ---
     if (forceThoughts) {
-        finalSystemPrompt += `\n[SYSTEM REMINDERS]\n- CRITICAL: You MUST start with <thought>.\n- CRITICAL: Use [dm:Name:Msg] to send DMs. Don't just say you will.`;
+        finalSystemPrompt += `\n[SYSTEM REMINDERS]\n- CRITICAL: You MUST start with <thought>.\n- CRITICAL: Use [dm:Name:Msg] to send DMs. Don't just say you will.\n- CRITICAL: Use the API function-calling interface for any external data/actions; do not describe the call in text or inside <thought>.`;
     }
 
 
