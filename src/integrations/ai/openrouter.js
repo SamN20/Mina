@@ -129,14 +129,25 @@ ${tagRules}
 
 3. **History Protocol**:
    - History is provided in <msg> tags. 
+   - History may contain messages from different contexts (Voice Chat, Text Chat, DMs).
+   - Context changes are marked with [Context changed: ...] lines. Acknowledge shifts naturally.
+   - Session breaks are marked with [New conversation session]. Don't awkwardly continue old topics.
    - PREVIOUS MESSAGES MAY CONTAIN FORMAT ERRORS. DO NOT COPY THEM. Always go by these rules.
    - Follow THESE rules, not the style of old messages.
 
-    4. **Function/Tool Calls**:
-   - When you need external data or to perform an action, use the API's function-calling mechanism (the model's tools interface). DO NOT describe, simulate, or place the function call in plain text.
-    - Emit a structured tool call via the model (message.tool_calls) with the function name and JSON arguments. Do NOT include function call details inside the <thought> tag or normal response text.
-   - After calling a tool, wait for the system to run the tool and provide results, then continue your final spoken response using those results.
-   - If no tool is required, do not invent or suggest tool calls.
+4. **Conversational Flow**:
+   - DO NOT greet the user with every message. Only greet on the FIRST message of a session.
+   - DO NOT repeat or echo back what the user just said. Respond to it naturally.
+   - Reference previous messages to show you're following the conversation.
+   - Stay on topic unless the user changes it.
+
+    5. **Function/Tool Calls**:
+   - You have tools available (recall_memories, get_weather, smart_search, set_reminder, manage_notes, etc.).
+   - When a user asks you to search, remember, look up, check weather, set a reminder, etc. you MUST make a tool call. Do NOT just say "let me check" without actually calling the tool.
+   - Do NOT describe or simulate tool calls in text. Actually invoke them.
+   - **CRITICAL: NEVER claim you have done something (set a reminder, searched, looked up, etc.) unless you actually made the tool call. If you didn't call a tool, don't pretend you did.**
+   - After a tool returns results, use those results in your spoken response.
+   - If no tool is needed, don't call any.
 `;
 
     // Combine System Prompt
@@ -155,17 +166,23 @@ ${tagRules}
 
     // Add History
     for (const msg of history) {
+        // Handle context/session markers (injected by history.getWithContextMarkers)
+        if (msg._marker) {
+            // Render markers as plain system annotations, not as <msg> XML
+            messages.push({
+                "role": "user",
+                "content": msg.content  // e.g. "[Context changed: Text Chat → Voice Chat]"
+            });
+            continue;
+        }
+
         // XML Format: <msg time="..." name="...">Content</msg>
-        // Use relative time or short time? Short absolute is fine with Date context.
         let timeAttr = "";
         if (msg.timestamp) {
             const d = new Date(msg.timestamp);
-            // Compact time: MM/DD HH:MM
-            // Let's us the explicit format:
 
             const month = d.toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'numeric' });
             const day = d.toLocaleDateString('en-US', { timeZone: 'America/New_York', day: 'numeric' });
-            // Use h23 to ensure 00-23 format (avoiding 24:00)
             const time = d.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false, hourCycle: 'h23' });
             const ts = `${month}/${day} ${time}`;
 
@@ -173,15 +190,12 @@ ${tagRules}
         }
 
         const nameAttr = msg.name ? ` name="${msg.name}"` : "";
-        const roleAttr = ` role="${msg.role}"`; // Helper for LLM to know who is who if name is missing
+        const roleAttr = ` role="${msg.role}"`;
 
-        // We wrap the content in <msg> text
-        // Note: OpenRouter/LLMs expect "content" to be the string. 
-        // We are formatting the content string itself to LOOK like XML.
         const content = `<msg${roleAttr}${nameAttr}${timeAttr}>${msg.content}</msg>`;
 
         messages.push({
-            "role": msg.role, // "user" or "assistant" - API requirement
+            "role": msg.role,
             "content": content
         });
     }
@@ -217,6 +231,32 @@ ${tagRules}
             if (tools.length > 0) {
                 requestBody.tools = tools;
                 requestBody.tool_choice = "auto";
+
+                // Keyword-based tool hinting: detect when user clearly needs a specific tool
+                // and inject a system-level nudge to guide the model (compatible with free models)
+                // Scan only the user's actual message, not the full prompt blob
+                const userMsg = (options.userMessage || '').toLowerCase();
+
+                if (userMsg) {
+                    const toolTriggers = [
+                        { tool: 'set_reminder', action: 'set a reminder', patterns: [/remind me/i, /set a reminder/i, /reminder for/i, /remind .+ in \d+/i, /don'?t let me forget/i] },
+                        { tool: 'get_weather', action: 'check the weather', patterns: [/weather/i, /temperature outside/i, /forecast/i, /how hot is it/i, /how cold is it/i, /is it raining/i] },
+                        { tool: 'smart_search', action: 'search the internet', patterns: [/search for/i, /look up/i, /google/i, /find out about/i, /when did .{3,}/i, /how many .{3,}/i] },
+                        { tool: 'recall_memories', action: 'search your memory', patterns: [/what do you remember/i, /do you remember/i, /recall .+ memor/i, /search your memory/i, /from your memory/i, /what do you know about me/i] },
+                        { tool: 'manage_notes', action: 'manage notes', patterns: [/write.* (?:a )?note/i, /add a note/i, /save a note/i, /my notes/i, /delete .+ note/i, /note (?:about|for|to)/i, /jot.* down/i] },
+                    ];
+
+                    const matchedTrigger = toolTriggers.find(t => {
+                        const toolExists = tools.some(s => s.function.name === t.tool);
+                        return toolExists && t.patterns.some(p => p.test(userMsg));
+                    });
+
+                    if (matchedTrigger) {
+                        console.log(`[OpenRouter] Tool hint: ${matchedTrigger.tool} (keyword match in user message)`);
+                        // Inject a nudge at the end of the system prompt
+                        requestBody.messages[0].content += `\n\n[TOOL HINT] The user appears to want to ${matchedTrigger.action}. You MUST call the ${matchedTrigger.tool} tool for this request. Do NOT respond without making the tool call first.`;
+                    }
+                }
             }
 
             // 1st Request
@@ -276,7 +316,6 @@ ${tagRules}
                         console.error("[OpenRouter] Failed to parse tool arguments", e);
                     }
 
-                    console.log(`[ToolRegistry] Executing ${fnName} with args:`, fnArgs);
 
                     try {
                         const result = await toolRegistry.executeTool(fnName, fnArgs, options);
@@ -335,6 +374,219 @@ ${tagRules}
                     } else if (followUpData.choices?.[0]?.message?.tool_calls) {
                         // Potential loop. For now, stop.
                         text = "I've done the calculations, but I'm getting a bit carried away. Let's pause.";
+                    }
+                }
+            }
+
+            // --- TOOL CALL RETRY: Detect when model describes a tool but doesn't invoke it ---
+            if (text && !message?.tool_calls && tools.length > 0) {
+                const toolNames = tools.map(t => t.function.name);
+                const responseText = (text || '').toLowerCase();
+
+                // Fuzzy match: check if all key words in a tool name appear in the response
+                // e.g. "set_reminder" -> words ["set", "reminder"] -> "I've set a reminder" matches
+                const mentionedTool = toolNames.find(name => {
+                    // Exact match (with underscores replaced)
+                    if (responseText.includes(name.replace(/_/g, ' ')) || responseText.includes(name)) return true;
+                    // Fuzzy: all words from tool name appear in response
+                    const words = name.split('_');
+                    if (words.length >= 2) {
+                        return words.every(w => responseText.includes(w));
+                    }
+                    return false;
+                });
+
+                // Also detect action claims without tool calls: "I've added", "I've set", etc.
+                const actionClaims = /i('ve| have| just)?\s*(set|searched|looked up|checked|found|recalled|remembered|fetched|retrieved|sent|created|added|saved|noted|wrote|recorded|removed|deleted|updated)/i;
+                const claimsAction = !mentionedTool && actionClaims.test(text);
+
+                if (mentionedTool) {
+                    console.log(`[OpenRouter] Model mentioned tool "${mentionedTool}" in text but didn't call it. Retrying with nudge...`);
+
+                    // Add the model's failed response and a nudge to actually call the tool
+                    messages.push({
+                        "role": "assistant",
+                        "content": text
+                    });
+                    messages.push({
+                        "role": "user",
+                        "content": `[System: You mentioned using ${mentionedTool} but didn't actually call it. Please make the actual tool call now instead of describing it in text.]`
+                    });
+
+                    try {
+                        const retryResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                            method: "POST",
+                            headers: {
+                                "Authorization": `Bearer ${apiKey}`,
+                                "Content-Type": "application/json",
+                                "HTTP-Referer": "https://github.com/SamN20/Mina",
+                                "X-Title": "Mina",
+                            },
+                            body: JSON.stringify({
+                                "model": model,
+                                "messages": messages,
+                                "tools": tools,
+                                "tool_choice": "auto",
+                                "reasoning": { "exclude": true }
+                            })
+                        });
+
+                        if (retryResponse.ok) {
+                            const retryData = await retryResponse.json();
+                            const retryMessage = retryData.choices?.[0]?.message;
+
+                            if (retryMessage?.tool_calls) {
+                                console.log(`[OpenRouter] Retry succeeded! Tool calls: ${retryMessage.tool_calls.length}`);
+
+                                // Remove the nudge messages we added
+                                messages.pop(); // remove nudge
+                                messages.pop(); // remove failed response
+
+                                messages.push(retryMessage);
+
+                                const retryToolResults = [];
+                                for (const toolCall of retryMessage.tool_calls) {
+                                    const fnName = toolCall.function.name;
+                                    let fnArgs = {};
+                                    try { fnArgs = JSON.parse(toolCall.function.arguments); } catch (e) { }
+
+                                    console.log(`[ToolRegistry] Executing ${fnName} with args:`, fnArgs);
+                                    try {
+                                        const result = await toolRegistry.executeTool(fnName, fnArgs, options);
+                                        retryToolResults.push({
+                                            tool_call_id: toolCall.id,
+                                            role: "tool",
+                                            name: fnName,
+                                            content: result
+                                        });
+                                    } catch (err) {
+                                        retryToolResults.push({
+                                            tool_call_id: toolCall.id,
+                                            role: "tool",
+                                            name: fnName,
+                                            content: JSON.stringify({ error: err.message })
+                                        });
+                                    }
+                                }
+
+                                messages.push(...retryToolResults);
+
+                                // Final request with tool results
+                                const finalResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                                    method: "POST",
+                                    headers: {
+                                        "Authorization": `Bearer ${apiKey}`,
+                                        "Content-Type": "application/json",
+                                        "HTTP-Referer": "https://github.com/SamN20/Mina",
+                                        "X-Title": "Mina",
+                                    },
+                                    body: JSON.stringify({
+                                        "model": model,
+                                        "messages": messages,
+                                        "reasoning": { "exclude": true }
+                                    })
+                                });
+
+                                if (finalResponse.ok) {
+                                    const finalData = await finalResponse.json();
+                                    const finalText = finalData.choices?.[0]?.message?.content;
+                                    if (finalText) {
+                                        text = finalText;
+                                        console.log(`[OpenRouter] Tool retry complete. Got final response.`);
+                                    }
+                                }
+                            } else if (retryMessage?.content) {
+                                // Model still didn't call the tool, but gave a new response
+                                text = retryMessage.content;
+                            }
+                        }
+                    } catch (retryErr) {
+                        console.error(`[OpenRouter] Tool retry failed:`, retryErr);
+                        // Keep original text as fallback
+                    }
+                } else if (claimsAction) {
+                    // Model claimed to have done an action but didn't make any tool call
+                    console.log(`[OpenRouter] Model claimed action without tool call. Retrying with nudge...`);
+
+                    messages.push({
+                        "role": "assistant",
+                        "content": text
+                    });
+                    messages.push({
+                        "role": "user",
+                        "content": `[System: You claimed to have performed an action but you didn't actually make a tool call. You must use the actual tool to perform actions — don't just say you did it. Please make the appropriate tool call now.]`
+                    });
+
+                    try {
+                        const retryResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                            method: "POST",
+                            headers: {
+                                "Authorization": `Bearer ${apiKey}`,
+                                "Content-Type": "application/json",
+                                "HTTP-Referer": "https://github.com/SamN20/Mina",
+                                "X-Title": "Mina",
+                            },
+                            body: JSON.stringify({
+                                "model": model,
+                                "messages": messages,
+                                "tools": tools,
+                                "tool_choice": "auto",
+                                "reasoning": { "exclude": true }
+                            })
+                        });
+
+                        if (retryResponse.ok) {
+                            const retryData = await retryResponse.json();
+                            const retryMessage = retryData.choices?.[0]?.message;
+
+                            if (retryMessage?.tool_calls) {
+                                console.log(`[OpenRouter] Action-claim retry succeeded! Tool calls: ${retryMessage.tool_calls.length}`);
+                                messages.pop(); // remove nudge
+                                messages.pop(); // remove failed response
+                                messages.push(retryMessage);
+
+                                const retryToolResults = [];
+                                for (const toolCall of retryMessage.tool_calls) {
+                                    const fnName = toolCall.function.name;
+                                    let fnArgs = {};
+                                    try { fnArgs = JSON.parse(toolCall.function.arguments); } catch (e) { }
+
+                                    console.log(`[ToolRegistry] Executing ${fnName} with args:`, fnArgs);
+                                    try {
+                                        const result = await toolRegistry.executeTool(fnName, fnArgs, options);
+                                        retryToolResults.push({ tool_call_id: toolCall.id, role: "tool", name: fnName, content: result });
+                                    } catch (err) {
+                                        retryToolResults.push({ tool_call_id: toolCall.id, role: "tool", name: fnName, content: JSON.stringify({ error: err.message }) });
+                                    }
+                                }
+
+                                messages.push(...retryToolResults);
+
+                                const finalResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                                    method: "POST",
+                                    headers: {
+                                        "Authorization": `Bearer ${apiKey}`,
+                                        "Content-Type": "application/json",
+                                        "HTTP-Referer": "https://github.com/SamN20/Mina",
+                                        "X-Title": "Mina",
+                                    },
+                                    body: JSON.stringify({ "model": model, "messages": messages, "reasoning": { "exclude": true } })
+                                });
+
+                                if (finalResponse.ok) {
+                                    const finalData = await finalResponse.json();
+                                    const finalText = finalData.choices?.[0]?.message?.content;
+                                    if (finalText) {
+                                        text = finalText;
+                                        console.log(`[OpenRouter] Action-claim tool retry complete.`);
+                                    }
+                                }
+                            } else if (retryMessage?.content) {
+                                text = retryMessage.content;
+                            }
+                        }
+                    } catch (retryErr) {
+                        console.error(`[OpenRouter] Action-claim retry failed:`, retryErr);
                     }
                 }
             }

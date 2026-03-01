@@ -51,3 +51,9 @@ Administrators can manage this feature via the `/toggle_auto` command.
 *   **Direct Mentions**: Bypasses all probability checks and buffers constraints (Always replies).
 *   **Ghost Mode**: Auto-conversation is suppressed when Ghost Mode is active to maintain stealth.
 *   **Mood**: The bot's current "Tilt" level acts as input to the system prompt, influencing whether the unprompted response is helpful, annoyed, or silent.
++
++## Response Protection
++
++To prevent feedback loops and "stuck" states, the system implements **Response Deduplication**:
++1.  **Deduplication Guard**: Before sending an auto-response, the system compares the new response (stripped of thoughts) against the last 3 assistant messages in history.
++2.  **Loop Breaking**: If an identical response is detected, the bot discards it and stays silent instead of repeating itself. This is critical for preventing the bot from "copying" its own previous false responses or stuck thoughts.

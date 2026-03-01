@@ -68,6 +68,12 @@ This abstraction allows the core system to prioritize, sequence, or modify actio
 The memory system provides state persistence through a local file-based database (`data/memory.json`).
 *   **Vector Search**: User interactions and facts are embedded and stored to allow semantic retrieval during conversation generation.
 *   **Profile Management**: Stores structured data such as user preferences and historical interactions.
++
++### 5. Conversation History (`src/core/history.js`)
++
++The history system manages the rolling context window for all active conversations (`data/history.json`).
++*   **Context Markers**: Automatically detects session gaps and context changes (e.g., from DM to Voice) to maintain coherence.
++*   **Thought Stripping**: To prevent model "inner monologue" from polluting future interactions, the history system automatically strips `<thought>` and `<thinking>` tags from assistant messages before saving them to persistent storage. This ensures the model only remembers its final responses, not its underlying reasoning process.
 
 ## Directory Organization
 

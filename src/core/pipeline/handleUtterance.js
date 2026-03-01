@@ -74,24 +74,32 @@ async function handleUtterance(text, context) {
 
 
     // AI Logic (Simulation of voiceHandler AI block)
-    const memoryContext = await memory.getContext(context.userId, context.username, query);
+    // Query Expansion: use last 3 user messages + current query for richer memory retrieval
+    const recentTexts = history.getRecentText(context.userId, 3);
+    const expandedQuery = recentTexts.length > 0 ? recentTexts.join(' ') + ' ' + query : query;
+    const memoryContext = await memory.getContext(context.userId, context.username, expandedQuery);
 
     const now = new Date();
     const timeString = now.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit' });
     const dateString = now.toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'long', month: 'long', day: 'numeric' });
 
-    const fullPrompt = `${memoryContext}\n[Your Current Status: "${context.currentStatus || 'Online'}"]\n${soundboard.getPromptSupplement()}\nUser: ${query}`;
+    // Session awareness
+    const sessionNote = history.hasSessionGap(context.userId) ? '\n[Note: This is a new conversation session — some time has passed since last interaction.]\n' : '';
 
-    // Update History (Add User Query)
-    history.add(context.userId, 'user', query, context.username);
+    const fullPrompt = `${memoryContext}${sessionNote}\n[Your Current Status: "${context.currentStatus || 'Online'}"]\n${soundboard.getPromptSupplement()}\nUser: ${query}`;
 
-    // Get History Window
-    const historyWindow = history.get(context.userId);
+    // Get History Window FIRST (before adding current message, to avoid duplication)
+    const voiceChannelName = context.channelName || 'Voice Chat';
+    const historyWindow = history.getWithContextMarkers(context.userId);
     const options = {
         userId: context.userId,
         guildId: context.guildId,
-        contextType: 'voice' // Since handleUtterance is usually voice/pipeline
+        contextType: 'voice',
+        userMessage: query
     };
+
+    // Now add current user message to history (after retrieving, so it's not duplicated in the prompt)
+    history.add(context.userId, 'user', query, context.username, { contextType: 'voice', channelName: voiceChannelName });
 
     const response = await ai.generateResponse(fullPrompt, historyWindow, options);
     console.log(`[AI] Response: "${response}"`);
@@ -181,7 +189,10 @@ async function handleUtterance(text, context) {
         // CRITICAL FIX: Save the RAW 'response' (with tags) effectively.
         // If we save 'spokenResponse', the AI sees history where it "sent a DM" but there is no tag,
         // so it learns to NOT generate tags.
-        history.add(context.userId, 'assistant', response, 'Mina');
+        history.add(context.userId, 'assistant', response, 'Mina', { contextType: 'voice', channelName: voiceChannelName });
+
+        // Trigger rolling summarization (non-blocking, fire and forget)
+        history.summarizeOldHistory(context.userId).catch(e => console.error('[Pipeline] Summarization error:', e));
 
         // Construct plan
         // Use AUDIO_SEQUENCE if we have multiple parts or just one sound part

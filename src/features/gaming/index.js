@@ -96,7 +96,7 @@ Your current mood is: ${currentMood.description} (Tilt: ${currentMood.level}%).
             // We save the raw response (with thoughts/tags) to history so she learns from it properly?
             // Actually, for history, we usually save what was said + actions.
             // Let's align with handleUtterance: save RAW response.
-            history.add(userId, 'assistant', response, 'Mina'); // Save RAW to history
+            history.add(userId, 'assistant', response, 'Mina', { contextType: 'gaming' }); // Save RAW to history
             autoConversation.injectBotMessage(newPresence.guild.id, spoken); // Inject CLEAN to autoconvo buffer
         }
     } catch (e) {

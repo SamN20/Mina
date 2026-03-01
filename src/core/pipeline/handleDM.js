@@ -46,24 +46,33 @@ async function handleDM(text, user, message = null) {
     }
 
     // 2. Build Context
-    // We reuse memory context logic
-    const context = await memory.getContext(userId, displayName, text);
+    // Query Expansion: use last 3 user messages + current text for richer memory retrieval
+    const recentTexts = history.getRecentText(userId, 3);
+    const expandedQuery = recentTexts.length > 0 ? recentTexts.join(' ') + ' ' + text : text;
+    const context = await memory.getContext(userId, displayName, expandedQuery);
 
     // 3. Prompt Construction
     // Include Mood and Status context similar to voice pipeline
     const mood = require('../../features/mood');
     const currentMood = mood.getMood();
-    // We don't have 'currentStatus' passed in easily from index.js msg, but likely not critical.
-    // We can infer it's "Messaging".
-    const fullPrompt = `${context}\n[Context: Direct Message Chat]\n[Your Mood: ${currentMood.description} (Tilt: ${currentMood.level}%)]\nUser: ${text}`;
 
-    // 4. Update History (User)
-    // Use the RESOLVED display name
-    history.add(userId, 'user', text, displayName);
+    // Session awareness
+    const sessionNote = history.hasSessionGap(userId) ? '\n[Note: This is a new conversation session — some time has passed since last interaction.]\n' : '';
 
-    // 5. Generate Response
-    const historyWindow = history.get(userId);
-    const response = await ai.generateResponse(fullPrompt, historyWindow);
+    const fullPrompt = `${context}${sessionNote}\n[Context: Direct Message Chat]\n[Your Mood: ${currentMood.description} (Tilt: ${currentMood.level}%)]\nUser: ${text}`;
+
+    // 4. Get History Window FIRST (before adding current message to avoid duplication)
+    const historyWindow = history.getWithContextMarkers(userId);
+
+    // 5. Now add current user message to history
+    history.add(userId, 'user', text, displayName, { contextType: 'dm' });
+
+    // 6. Generate Response
+    const response = await ai.generateResponse(fullPrompt, historyWindow, {
+        userId: userId,
+        contextType: 'dm',
+        userMessage: text
+    });
 
     if (!response) return null;
 
@@ -93,9 +102,9 @@ async function handleDM(text, user, message = null) {
         return null;
     }
 
-    // 7. Update History (AI)
+    // 7. Update History (AI) - with DM context metadata
     // Save RAW response to maintain consistency
-    history.add(userId, 'assistant', response, 'Mina');
+    history.add(userId, 'assistant', response, 'Mina', { contextType: 'dm' });
 
     // 8. Learning
     const historyForLearning = history.get(userId);
@@ -111,6 +120,9 @@ async function handleDM(text, user, message = null) {
         // But let's set it false just to keep state clean.
         memory.setExpectingDM(userId, false);
     }
+
+    // Trigger rolling summarization (non-blocking)
+    history.summarizeOldHistory(userId).catch(e => console.error('[DM Pipeline] Summarization error:', e));
 
     return cleanResponse;
 }

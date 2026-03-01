@@ -69,3 +69,16 @@ module.exports = {
     4.  Result is fed back to the AI.
     5.  AI generates the final response using the data.
 *   **Parallelism**: The system supports executing multiple tools simultaneously to save time and API tokens.
++
++## Reliability Layer
++
++To handle unreliable model behavior (where the model might "think" about using a tool but fail to call it), Mina uses a layered reliability system:
++
++1.  **Trigger Keyword Match (Hinting)**:
++    The system scans the user's raw message for keywords (e.g., "weather", "remind me", "look up"). If a match is found, it injects a `[TOOL HINT]` into the system prompt, specifically instructing the model that it **MUST** use that tool.
++
++2.  **Detection + Retry**:
++    If a model's response mentions a tool name in it's thought tags or text (e.g., "I should use the weather tool") but doesn't actually emit a `tool_calls` payload, the system catches this. It then provides a feedback nudge: *"You mentioned using the tool but didn't call it. Please call the tool now."* and retries the request.
++
++3.  **Action Claim Detection**:
++    The system also detects common phrases where the model falsely claims an action was performed without a tool call (e.g., "I've added the note"). These also trigger the retry mechanism.

@@ -9,7 +9,7 @@ const cache = new Map();
 const CACHE_TTL = 1000 * 60 * 60; // 1 Hour
 
 // Model Config
-const VISION_MODEL = 'allenai/molmo-2-8b:free';
+const VISION_MODEL = 'google/gemma-3-27b-it:free';
 
 /**
  * Analyze an image using OpenRouter Vision Model
@@ -24,7 +24,7 @@ async function analyzeImage(imageUrl, prompt = "Describe this image", mode = 'de
         console.error("[Vision] Missing OPENROUTER_API_KEY");
         return "I can't see images right now (missing API key).";
     }
-    
+
     // Handle data URLs (base64 images from satellite)
     let finalImageUrl = imageUrl;
     if (imageUrl.startsWith('data:image')) {
@@ -75,9 +75,7 @@ async function analyzeImage(imageUrl, prompt = "Describe this image", mode = 'de
             },
             body: JSON.stringify({
                 model: VISION_MODEL,
-                messages: messages,
-                // Molmo is free, but let's be safe with tokens
-                max_tokens: 500
+                messages: messages
             })
         });
 
@@ -120,25 +118,25 @@ async function storeVisionMemory(userId, imageUrl, description, username = null)
     try {
         const profile = memory.getProfileData(userId);
         const displayName = profile.displayName || username || 'User';
-        
+
         // Create image hash for deduplication
         const imageHash = crypto.createHash('md5').update(imageUrl).digest('hex').substring(0, 8);
-        
+
         // Create a concise summary memory
         // Format: "Sam posted an image of a broken Gradle build log"
-        const summary = description.length > 100 
-            ? description.substring(0, 100) + '...' 
+        const summary = description.length > 100
+            ? description.substring(0, 100) + '...'
             : description;
-        
+
         const memoryText = `${displayName} posted an image: ${summary}`;
-        
+
         // Use memory module's helper function
         const added = await memory.addVisionMemory(userId, memoryText, imageHash);
-        
+
         if (added) {
             console.log(`[Vision Memory] Stored vision memory for ${displayName}: "${summary.substring(0, 50)}..."`);
         }
-        
+
     } catch (error) {
         console.error("[Vision Memory] Failed to store vision memory:", error);
     }

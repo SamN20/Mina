@@ -200,14 +200,9 @@ async function processUtterance(text, context) {
     // MEMORY & CONTEXT INTEGRATION (Unified with Voice Pipeline)
     let memoryContext = "";
     try {
-        // Use the robust getContext from memory core which handles profile, gaming, search, and recall
-        // We use the *last* speaker's ID for the context lookup if possible
         if (context.userId) {
             memoryContext = await memory.getContext(context.userId, username, text);
         } else {
-            // Fallback if no specific target (e.g. ambient noise?), just get AI context?
-            // Or maybe getContext handles missing user? It expects userId.
-            // We'll just search generic if we have to.
             const aiProfile = memory.getProfileData("MINA_SELF");
             if (aiProfile.memories.length > 0) {
                 const genericSearch = await memory.searchMemories(text, 3);
@@ -216,51 +211,64 @@ async function processUtterance(text, context) {
         }
     } catch (e) { console.error("[AutoConvo] Memory Context Error:", e); }
 
+    // NOTE: We do NOT include the full persona/system instruction here.
+    // OpenRouter's generateResponse already injects the persona, operational rules, and tool schemas.
+    // This prompt is ONLY the user-facing context for this specific auto-conversation trigger.
     const prompt = `
-${systemInstruction}
-
 [Context]
 Current Time: ${shortTime}
 Channel: #${channelName}
-${isDirect ? '[ALERT] You were directly mentioned or replied to. You MUST respond.' : '(You are observing this conversation)'}
+${isDirect ? '[ALERT] You were directly mentioned or replied to. You MUST respond.' : '(You are passively observing this conversation)'}
 ${replyContext ? `\n[Replying To]\n(The user is explicitly replying to this message)\n${replyContext.username}: ${replyContext.content}\n` : ''}
 ${memoryContext}
 
-[Conversation Log]
+[Recent Conversation in #${channelName}]
 ${transcript.join('\n')}
 
-[Instructions]
-- Decide if you want to speak.
-- If this is a Direct Mention, you MUST respond.
-- If this is passive observation:
-    - Respond if you have something witty, helpful, or funny to add.
-    - Output "SILENT" if you have nothing to say.
-- Output "REACT:emoji" (e.g., REACT:🔥) if a text response is too much but you want to acknowledge the message.
-- Keep text responses short (max 2 sentences).
-- You can perform animations: [anim:Name]
-- Available animations: ${vrmAnimation.getAvailableAnimations()}.
-${soundboard.getPromptSupplement()}
+[Auto-Conversation Mode]
+- ${isDirect ? 'You were mentioned — respond naturally.' : 'You are observing — only speak if you have something relevant, witty, or helpful to add. Output "SILENT" to stay quiet.'}
+- Output "REACT:emoji" (e.g., REACT:🔥) to react without a full message.
+- Keep responses short (1-2 sentences max).
+- If the user asks you to search, remember, look up, or check something — use your tools.
 `;
 
     try {
-        // Record User Input to History (if direct)
-        // If it's a "bystander" conversation, we might not want to clog "Direct History" with it?
-        // But if she responds, it becomes part of the shared history.
-        // Let's only add to history if she decides to speak OR if it was a Direct Mention.
+        // Get history window FIRST (before adding current message to avoid duplication)
+        // The current message is already in the transcript/prompt, so history should only show previous exchanges
+        const historyWindow = context.userId ? history.getWithContextMarkers(context.userId) : [];
+
+        // Now add user input to history (if direct mention)
         if (isDirect && context.userId) {
-            history.add(context.userId, 'user', text, username);
+            history.add(context.userId, 'user', text, username, { contextType: 'auto', channelName: channelName });
         }
 
         // Pass context info (voice/text, guildId) to allow feedback for tools
-        const response = await ai.generateResponse(prompt, [], {
+        const response = await ai.generateResponse(prompt, historyWindow, {
             contextType: type, // 'voice' or 'text'
             guildId: guildId,
-            userId: context.userId
+            userId: context.userId,
+            userMessage: text // raw user message for tool keyword detection
         });
 
         if (!response || (response.includes('SILENT') && !isDirect) || response.length < 2) {
             console.log(`[AutoConvo] AI decided to stay silent.`);
             return;
+        }
+
+        // DEDUPLICATION GUARD: Prevent feedback loops where the model repeats the same response
+        // Strip thought tags for comparison since they're cleaned before storage
+        const cleanResponse = response.replace(/<thought>[\s\S]*?<\/thought>/gi, '').trim();
+        if (context.userId) {
+            const recentHistory = history.get(context.userId);
+            const recentAssistantMsgs = recentHistory
+                .filter(h => h.role === 'assistant')
+                .slice(-3) // last 3 assistant messages
+                .map(h => h.content?.trim());
+
+            if (recentAssistantMsgs.includes(cleanResponse)) {
+                console.warn(`[AutoConvo] DUPLICATE response detected — discarding to prevent feedback loop: "${cleanResponse.substring(0, 60)}..."`);
+                return;
+            }
         }
 
         // 6. Processing Response
@@ -297,7 +305,7 @@ ${soundboard.getPromptSupplement()}
 
             // If we haven't added the user message yet (passive wake-up), add it now effectively as context
             if (!isDirect) {
-                history.add(context.userId, 'user', text, username);
+                history.add(context.userId, 'user', text, username, { contextType: 'auto', channelName: channelName });
             }
 
             // Learn (We need parsed thoughts and clean text)
@@ -310,7 +318,7 @@ ${soundboard.getPromptSupplement()}
             // Moving the logic is safer to avoid double parsing.
 
             // Let's just save RAW response here.
-            history.add(context.userId, 'assistant', response, 'Mina');
+            history.add(context.userId, 'assistant', response, 'Mina', { contextType: 'auto', channelName: channelName });
 
             // For learning, we need clean text.
             const tempParsed = parser.parseResponse(response);
@@ -321,6 +329,9 @@ ${soundboard.getPromptSupplement()}
                 history.get(context.userId),
                 tempParsed.thoughts
             );
+
+            // Trigger rolling summarization (non-blocking)
+            history.summarizeOldHistory(context.userId).catch(e => console.error('[AutoConvo] Summarization error:', e));
         }
 
         // FEATURE: Hot Thread Mode
