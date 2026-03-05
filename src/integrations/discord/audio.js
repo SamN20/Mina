@@ -5,7 +5,7 @@ const {
     StreamType,
     AudioPlayerStatus,
     VoiceConnectionStatus,
-    enterState
+    entersState
 } = require('@discordjs/voice');
 const fs = require('fs');
 const tts = require('../tts');
@@ -48,8 +48,7 @@ function join(channel) {
         guildId: channel.guild.id,
         adapterCreator: channel.guild.voiceAdapterCreator,
         selfDeaf: false,
-        selfMute: false,
-        daveEncryption: false
+        selfMute: false
     });
 
     connections.set(channel.guild.id, connection);
@@ -60,8 +59,8 @@ function join(channel) {
     connection.on(VoiceConnectionStatus.Disconnected, async () => {
         try {
             await Promise.race([
-                enterState(connection, VoiceConnectionStatus.Signalling, 5_000),
-                enterState(connection, VoiceConnectionStatus.Connecting, 5_000),
+                entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
+                entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
             ]);
         } catch (error) {
             console.log(`[Audio] Disconnected from ${channel.guild.id}`);
