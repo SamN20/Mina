@@ -218,6 +218,9 @@ ${tagRules}
 
     for (const model of modelsToTry) {
         try {
+            // Track executed tool results during this generateResponse run to avoid duplicates
+            const executedToolResults = new Map(); // key -> result
+
             const requestBody = {
                 "model": model,
                 "messages": messages,
@@ -284,9 +287,7 @@ ${tagRules}
             // Handle Tool Calls
             if (message && message.tool_calls) {
                 console.log(`[OpenRouter] Tool calls detected: ${message.tool_calls.length}`);
-
                 const toolCalls = message.tool_calls;
-                // Removed duplicate log
 
                 // Voice Feedback for Search (during voice calls)
                 if (options.contextType === 'voice' && options.guildId) {
@@ -316,9 +317,17 @@ ${tagRules}
                         console.error("[OpenRouter] Failed to parse tool arguments", e);
                     }
 
+                    // Dedupe by id or name+args
+                    const key = `${fnName}:${JSON.stringify(fnArgs)}`;
+                    if (executedToolResults.has(key)) {
+                        const prev = executedToolResults.get(key);
+                        toolResults.push({ tool_call_id: toolCall.id || key, role: 'tool', name: fnName, content: prev });
+                        continue;
+                    }
 
                     try {
                         const result = await toolRegistry.executeTool(fnName, fnArgs, options);
+                        executedToolResults.set(key, result);
                         toolResults.push({
                             tool_call_id: toolCall.id,
                             role: "tool",
@@ -327,11 +336,13 @@ ${tagRules}
                         });
                     } catch (err) {
                         console.error(`[ToolRegistry] Error executing ${fnName}:`, err);
+                        const errContent = JSON.stringify({ error: err.message });
+                        executedToolResults.set(key, errContent);
                         toolResults.push({
                             tool_call_id: toolCall.id,
                             role: "tool",
                             name: fnName,
-                            content: JSON.stringify({ error: err.message })
+                            content: errContent
                         });
                     }
                 }
@@ -341,40 +352,78 @@ ${tagRules}
 
                 console.log(`[OpenRouter] Tools executed. Sending results back to model...`);
 
-                // 2nd Request (with tool results)
-                const followUpResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-                    method: "POST",
-                    headers: {
-                        "Authorization": `Bearer ${apiKey}`,
-                        "Content-Type": "application/json",
-                        "HTTP-Referer": "https://github.com/SamN20/Mina",
-                        "X-Title": "Mina",
-                    },
-                    body: JSON.stringify({
-                        "model": model,
-                        "messages": messages,
-                        "tools": tools,
-                        "tool_choice": "auto",
-                        "reasoning": {
-                            "exclude": true
+                // Follow-up loop: allow the model to request additional tool calls up to a small depth
+                let nestedCount = 0;
+                const MAX_NESTED = 3;
+                let followUpData = null;
+                while (nestedCount < MAX_NESTED) {
+                    const followUpResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                        method: "POST",
+                        headers: {
+                            "Authorization": `Bearer ${apiKey}`,
+                            "Content-Type": "application/json",
+                            "HTTP-Referer": "https://github.com/SamN20/Mina",
+                            "X-Title": "Mina",
+                        },
+                        body: JSON.stringify({
+                            "model": model,
+                            "messages": messages,
+                            "tools": tools,
+                            "tool_choice": "auto",
+                            "reasoning": {
+                                "exclude": true
+                            },
+                            "stream": false
+                        })
+                    });
+
+                    if (!followUpResponse.ok) {
+                        const errorText = await followUpResponse.text();
+                        console.error("Follow-up request failed:", errorText);
+                        break;
+                    }
+
+                    followUpData = await followUpResponse.json();
+                    const followMsg = followUpData.choices?.[0]?.message;
+                    const followUpText = followMsg?.content;
+
+                    if (followMsg && followMsg.tool_calls && followMsg.tool_calls.length > 0) {
+                        // Execute these nested tool calls
+                        messages.push(followMsg);
+                        const nestedToolResults = [];
+                        for (const tc of followMsg.tool_calls) {
+                            const fnName = tc.function.name;
+                            let fnArgs = {};
+                            try { fnArgs = JSON.parse(tc.function.arguments); } catch (e) { console.error('[OpenRouter] Failed to parse nested tool args', e); }
+
+                            const key = `${fnName}:${JSON.stringify(fnArgs)}`;
+                            if (executedToolResults.has(key)) {
+                                nestedToolResults.push({ tool_call_id: tc.id || key, role: 'tool', name: fnName, content: executedToolResults.get(key) });
+                                continue;
+                            }
+
+                            try {
+                                const result = await toolRegistry.executeTool(fnName, fnArgs, options);
+                                executedToolResults.set(key, result);
+                                nestedToolResults.push({ tool_call_id: tc.id || `nested-${Date.now()}`, role: 'tool', name: fnName, content: result });
+                            } catch (err) {
+                                console.error('[OpenRouter] Nested tool error:', err);
+                                const errContent = JSON.stringify({ error: err.message });
+                                executedToolResults.set(key, errContent);
+                                nestedToolResults.push({ tool_call_id: tc.id || `nested-${Date.now()}`, role: 'tool', name: fnName, content: errContent });
+                            }
                         }
-                    })
-                });
+                        messages.push(...nestedToolResults);
+                        nestedCount++;
+                        // loop to allow model to consume nested results and potentially call more tools
+                        continue;
+                    }
 
-                if (!followUpResponse.ok) {
-                    const errorText = await followUpResponse.text();
-                    console.error("Follow-up request failed:", errorText);
-                    // fallback to what we have? or continue?
-                } else {
-                    const followUpData = await followUpResponse.json();
-                    let followUpText = followUpData.choices?.[0]?.message?.content;
-
+                    // No nested tool calls: use content if present
                     if (followUpText) {
                         text = followUpText;
-                    } else if (followUpData.choices?.[0]?.message?.tool_calls) {
-                        // Potential loop. For now, stop.
-                        text = "I've done the calculations, but I'm getting a bit carried away. Let's pause.";
                     }
+                    break;
                 }
             }
 
@@ -450,22 +499,21 @@ ${tagRules}
                                     let fnArgs = {};
                                     try { fnArgs = JSON.parse(toolCall.function.arguments); } catch (e) { }
 
+                                    const key = `${fnName}:${JSON.stringify(fnArgs)}`;
+                                    if (executedToolResults.has(key)) {
+                                        retryToolResults.push({ tool_call_id: toolCall.id || key, role: 'tool', name: fnName, content: executedToolResults.get(key) });
+                                        continue;
+                                    }
+
                                     console.log(`[ToolRegistry] Executing ${fnName} with args:`, fnArgs);
                                     try {
                                         const result = await toolRegistry.executeTool(fnName, fnArgs, options);
-                                        retryToolResults.push({
-                                            tool_call_id: toolCall.id,
-                                            role: "tool",
-                                            name: fnName,
-                                            content: result
-                                        });
+                                        executedToolResults.set(key, result);
+                                        retryToolResults.push({ tool_call_id: toolCall.id, role: "tool", name: fnName, content: result });
                                     } catch (err) {
-                                        retryToolResults.push({
-                                            tool_call_id: toolCall.id,
-                                            role: "tool",
-                                            name: fnName,
-                                            content: JSON.stringify({ error: err.message })
-                                        });
+                                        const errContent = JSON.stringify({ error: err.message });
+                                        executedToolResults.set(key, errContent);
+                                        retryToolResults.push({ tool_call_id: toolCall.id, role: "tool", name: fnName, content: errContent });
                                     }
                                 }
 
@@ -551,12 +599,21 @@ ${tagRules}
                                     let fnArgs = {};
                                     try { fnArgs = JSON.parse(toolCall.function.arguments); } catch (e) { }
 
+                                    const key = `${fnName}:${JSON.stringify(fnArgs)}`;
+                                    if (executedToolResults.has(key)) {
+                                        retryToolResults.push({ tool_call_id: toolCall.id || key, role: 'tool', name: fnName, content: executedToolResults.get(key) });
+                                        continue;
+                                    }
+
                                     console.log(`[ToolRegistry] Executing ${fnName} with args:`, fnArgs);
                                     try {
                                         const result = await toolRegistry.executeTool(fnName, fnArgs, options);
+                                        executedToolResults.set(key, result);
                                         retryToolResults.push({ tool_call_id: toolCall.id, role: "tool", name: fnName, content: result });
                                     } catch (err) {
-                                        retryToolResults.push({ tool_call_id: toolCall.id, role: "tool", name: fnName, content: JSON.stringify({ error: err.message }) });
+                                        const errContent = JSON.stringify({ error: err.message });
+                                        executedToolResults.set(key, errContent);
+                                        retryToolResults.push({ tool_call_id: toolCall.id, role: "tool", name: fnName, content: errContent });
                                     }
                                 }
 
