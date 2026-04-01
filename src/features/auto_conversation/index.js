@@ -233,9 +233,9 @@ ${transcript.join('\n')}
 `;
 
     try {
-        // Get history window FIRST (before adding current message to avoid duplication)
-        // The current message is already in the transcript/prompt, so history should only show previous exchanges
-        const historyWindow = context.userId ? history.getWithContextMarkers(context.userId) : [];
+        // Auto-convo prompt already includes a rolling channel transcript.
+        // Passing persistent history as well can duplicate context in the same request.
+        const historyWindow = [];
 
         // Now add user input to history (if direct mention)
         if (isDirect && context.userId) {
