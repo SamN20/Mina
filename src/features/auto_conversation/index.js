@@ -27,6 +27,33 @@ const conversationBuffers = new Map(); // key (guildId or channelId) -> Array of
 const lastChimeTimes = new Map(); // key -> timestamp (last time she spoke)
 const hotThreads = new Map(); // key -> timestamp (expires after HOT_THREAD_WINDOW)
 
+function startTypingLoop(channel, intervalMs = 8000) {
+    if (!channel || typeof channel.sendTyping !== 'function') {
+        return () => { };
+    }
+
+    let stopped = false;
+
+    const tick = async () => {
+        if (stopped) return;
+        try {
+            await channel.sendTyping();
+        } catch (e) {
+            // Ignore transient typing failures.
+        }
+    };
+
+    // Send immediately, then refresh before Discord's typing timeout expires.
+    tick();
+    const timer = setInterval(tick, intervalMs);
+    if (typeof timer.unref === 'function') timer.unref();
+
+    return () => {
+        stopped = true;
+        clearInterval(timer);
+    };
+}
+
 /**
  * Process a new utterance for potential chime-in
  * @param {string} text 
@@ -155,6 +182,8 @@ async function processUtterance(text, context) {
 
     if (!shouldCheckAI) return;
 
+    let stopTyping = null;
+
     // 4. Rate Limit Check (Text Only)
     // Voice usually has different considerations or is 'unlimited' relative to this feature's strict controls
     if (type === 'text') {
@@ -162,8 +191,8 @@ async function processUtterance(text, context) {
             console.log(`[AutoConvo] Daily text limit reached (${usage.DAILY_LIMIT}). Skipping.`);
             return;
         }
-        // Send Typing Indicator immediately
-        if (channel) channel.sendTyping();
+        // Keep typing active while AI is thinking and until message send completes.
+        if (channel) stopTyping = startTypingLoop(channel);
     }
 
     // 5. Ask AI
@@ -417,21 +446,20 @@ ${transcript.join('\n')}
 
         // Execution
         if (type === 'text' && channel) {
-            await channel.sendTyping();
-
             // Wait a bit then send (simulate typing)
-            setTimeout(async () => { // Changed to async to allow await channel.send
-                // Safety Check: Do not send empty messages
-                if (!spokenResponse || spokenResponse.length === 0) {
-                    console.warn("[AutoConvo] Prevented empty message send (likely pure thought output).");
-                    return;
-                }
-                try {
-                    await channel.send(spokenResponse);
-                } catch (err) {
-                    console.error("Failed to send message:", err);
-                }
-            }, 2000);
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            // Safety Check: Do not send empty messages
+            if (!spokenResponse || spokenResponse.length === 0) {
+                console.warn("[AutoConvo] Prevented empty message send (likely pure thought output).");
+                return;
+            }
+
+            try {
+                await channel.send(spokenResponse);
+            } catch (err) {
+                console.error("Failed to send message:", err);
+            }
 
         } else {
             if (sequence.length > 0) {
@@ -453,6 +481,8 @@ ${transcript.join('\n')}
 
     } catch (e) {
         console.error("[AutoConvo] Error:", e);
+    } finally {
+        if (stopTyping) stopTyping();
     }
 }
 
